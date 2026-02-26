@@ -1,0 +1,21 @@
+# ── Core (always required) ────────────────────────────────────────────────────
+rich>=13.7.0
+pydantic>=2.0.0
+pytest>=8.0.0
+pytest-mock>=3.12.0
+
+# ── LLM Providers (install the one you use) ───────────────────────────────────
+google-generativeai>=0.7.0   # LLM_PROVIDER=gemini      (default)
+# openai>=1.30.0             # LLM_PROVIDER=openai | ollama | openai_compat
+# anthropic>=0.25.0          # LLM_PROVIDER=anthropic
+
+# ── Security scanning (optional but strongly recommended) ─────────────────────
+# Install these for the SecurityAgent stage:
+#   pip install bandit pip-audit
+#
+# bandit    → Python SAST (SQL injection, hardcoded secrets, insecure calls)
+# pip-audit → Python dependency CVE scanning
+# semgrep   → Multi-language SAST (Node.js, Java) — install via: pip install semgrep
+#
+# bandit>=1.7.0
+# pip-audit>=2.7.0
