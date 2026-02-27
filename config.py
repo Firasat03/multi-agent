@@ -7,7 +7,7 @@ from pathlib import Path
 
 # ─── LLM ──────────────────────────────────────────────────────────────────────
 LLM_PROVIDER   = os.getenv("LLM_PROVIDER",   "gemini")
-LLM_MODEL      = os.getenv("LLM_MODEL",      "gemini-2.0-flash")
+LLM_MODEL      = os.getenv("LLM_MODEL",      "gemini-flash-latest")
 LLM_BASE_URL   = os.getenv("LLM_BASE_URL",   "")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
