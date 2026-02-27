@@ -47,6 +47,8 @@ class DebuggerAgent(BaseAgent):
     def run(self, state: PipelineState) -> PipelineState:
         state.status = Status.DEBUGGING
 
+        print(f"\n🐛 Debugger: Analyzing test failures...")
+        
         files_block = _format_files_truncated(state.generated_files)
 
         static_section = (
@@ -142,6 +144,16 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
         fix_match = re.search(r"FIX INSTRUCTIONS:\s*(.+)$", response_text, re.DOTALL)
         fix_instructions = fix_match.group(1).strip() if fix_match else response_text
 
+        # Extract affected files for logging
+        affected = []
+        for line in response_text.split('\n'):
+            if 'AFFECTED FILES:' in line or 'FILE:' in line:
+                match = re.search(r"\b(src/\S+|tests/\S+|\S+\.java|\S+\.py|\S+\.ts)", line)
+                if match:
+                    affected.append(match.group(1))
+        
+        affected_str = ", ".join(set(affected)) if affected else "unknown"
+
         if confidence < _LOW_CONFIDENCE_THRESHOLD:
             state.record_failure(
                 stage="DEBUGGING",
@@ -156,6 +168,9 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
                 escalate=True,
             )
             state.apply(output)
+            print(f"   ⚠️  LOW CONFIDENCE ({confidence}/5) - Cannot reliably fix issues")
+            print(f"   📍 Affected files: {affected_str}")
+            print(f"   🚨 Escalating to human review")
             state.log(
                 self.name,
                 tokens=tokens,
@@ -169,6 +184,9 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
             )
             state.apply(output)
             state.retry_count += 1
+            print(f"   ✓ Fix analysis complete (confidence: {confidence}/5)")
+            print(f"   📍 Affected files: {affected_str}")
+            print(f"   ↻ Sending back to Coder for implementation (retry #{state.retry_count})")
             state.log(
                 self.name,
                 tokens=tokens,

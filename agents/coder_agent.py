@@ -76,13 +76,19 @@ class CoderAgent(BaseAgent):
         new_files: dict[str, str] = {}
         total_tokens = 0
 
-        for item in state.plan:
+        for idx, item in enumerate(state.plan, 1):
             if item.action == "DELETE":
                 state.generated_files.pop(item.file, None)
+                print(f"  [{idx}/{len(state.plan)}] ❌ DELETE {item.file}")
                 continue
 
             existing = self._read_existing(item, state)
             prompt = self._build_prompt(item, existing, state)
+            
+            # Log progress
+            action_icon = "✏️" if item.action == "MODIFY" else "✨"
+            print(f"  [{idx}/{len(state.plan)}] {action_icon} {item.action} {item.file}...", end="", flush=True)
+            
             response_text, tokens = self._call_llm(state, prompt)
             total_tokens += tokens
 
@@ -90,6 +96,7 @@ class CoderAgent(BaseAgent):
 
             if parsed:
                 new_files.update(parsed)
+                print(f" ✓ ({tokens} tokens)")
             else:
                 # Fall back: try extracting a single code block (no FILE: header)
                 lang = _ext_to_lang(item.file)
@@ -97,11 +104,14 @@ class CoderAgent(BaseAgent):
                 try:
                     self._validate_code_output(item.file, code)
                     new_files[item.file] = code
+                    print(f" ✓ ({tokens} tokens) [fallback parse]")
                 except ValueError as exc:
+                    print(f" ✗")
                     raise RuntimeError(
                         f"Coder failed to produce valid code for {item.file!r}: {exc}"
                     ) from exc
 
+        print(f"\n📝 Coder complete: {len(new_files)} files generated")
         output = CoderOutput(generated_files=new_files)
         state.apply(output)
         state.fix_instructions = None
@@ -233,12 +243,14 @@ FILES TO UPDATE:
 
 Please provide the updated files:
 """
+        print(f"\n🔧 Coder: Applying fixes from Debugger...")
         response_text, tokens = self._call_llm(state, prompt)
         parsed = self._extract_files_from_response(response_text, validate=True)
 
         fixed_files: dict[str, str] = {}
         if parsed:
             fixed_files = parsed
+            print(f"✓ Extracted {len(parsed)} fixed file(s)")
         else:
             # Try harder: if no explicit FILE blocks, try extracting from prose
             console_msg = (
@@ -291,6 +303,14 @@ Please provide the files now:
                     "The fix may not have been applied. Outputting unchanged files."
                 )
                 fixed_files = {}
+            else:
+                print(f"✓ Retry successful: extracted {len(fixed_files)} file(s)")
+
+        # Show which files were updated
+        if fixed_files:
+            print("\n📄 Updated files:")
+            for fpath in fixed_files:
+                print(f"   • {fpath}")
 
         output = CoderOutput(generated_files=fixed_files)
         state.apply(output)

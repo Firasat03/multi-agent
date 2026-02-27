@@ -153,15 +153,46 @@ class LLMProvider(ABC):
         """Strip markdown fences and parse JSON from LLM response."""
         # Strip ```json ... ``` or ``` ... ```
         clean = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
+        
         # Try direct parse first
         try:
             return json.loads(clean)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as first_error:
             pass
-        # Fallback: find the first [...] or {...} block
-        m = re.search(r"(\[.*\]|\{.*\})", clean, re.DOTALL)
-        if m:
-            return json.loads(m.group(1))
+        
+        # Fallback: find the first valid JSON block using bracket matching
+        # This avoids the greedy regex problem that included extra data
+        for start_pos in range(len(clean)):
+            char = clean[start_pos]
+            if char == '[':
+                try:
+                    # Try to find matching closing bracket
+                    bracket_count = 0
+                    for end_pos in range(start_pos, len(clean)):
+                        if clean[end_pos] == '[':
+                            bracket_count += 1
+                        elif clean[end_pos] == ']':
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                json_str = clean[start_pos:end_pos + 1]
+                                return json.loads(json_str)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+            elif char == '{':
+                try:
+                    # Try to find matching closing brace
+                    brace_count = 0
+                    for end_pos in range(start_pos, len(clean)):
+                        if clean[end_pos] == '{':
+                            brace_count += 1
+                        elif clean[end_pos] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                json_str = clean[start_pos:end_pos + 1]
+                                return json.loads(json_str)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+        
         raise ValueError(f"No valid JSON found in LLM response: {text[:200]!r}")
 
 

@@ -65,6 +65,9 @@ class ReviewerAgent(BaseAgent):
             for path, content in state.generated_files.items()
         )
 
+        print(f"\n📋 Reviewer: Analyzing {len(state.generated_files)} file(s)...")
+        print(f"   Files to review: {', '.join(state.generated_files.keys())}")
+
         prompt = f"""
 Review the following generated backend code strictly.
 
@@ -111,10 +114,33 @@ START REVIEW:
         output = ReviewerOutput(review_notes=response_text, verdict=verdict)
         state.apply(output)
 
+        # Parse and display review feedback
         if verdict == "REJECT":
             state.review_retry_count += 1
-            state.log(self.name, tokens=tokens, notes="REJECTED")
+            print(f"\n❌ Review REJECTED")
+            # Extract reason from response
+            reason_match = re.search(r"REASON:\s*(.+?)(?:\n|$)", response_text, re.IGNORECASE)
+            if reason_match:
+                reason = reason_match.group(1).strip()
+                print(f"\n🔴 Issues Found:")
+                print(f"   {reason}")
+            else:
+                # Extract what went wrong from the review notes
+                lines = response_text.split('\n')
+                issues = [line for line in lines if any(
+                    keyword in line.lower() for keyword in 
+                    ['error', 'issue', 'missing', 'vulnerable', 'incorrect', 'failed', 'problem']
+                )]
+                if issues:
+                    print(f"\n🔴 Issues Found:")
+                    for issue in issues[:5]:  # Show top 5 issues
+                        if issue.strip():
+                            print(f"   • {issue.strip()}")
+            print(f"\n💡 Action: Sending back to Coder for fixes...")
+            state.log(self.name, tokens=tokens, notes="REJECTED - needs rework")
         else:
+            print(f"✅ Review PASSED")
+            print(f"   ✓ All files meet quality standards")
             state.log(self.name, tokens=tokens, notes="PASSED")
 
         return state

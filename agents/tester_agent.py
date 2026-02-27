@@ -89,10 +89,13 @@ class TesterAgent(BaseAgent):
     def run(self, state: PipelineState) -> PipelineState:
         state.status = Status.TESTING
 
+        print(f"\n🧪 Tester: Starting test suite generation and validation...")
         language = self._resolve_language(state)
+        print(f"   Language: {language}")
         output = TesterOutput()
 
         # ── Step 1: Static Analysis ───────────────────────────────────────
+        print(f"\n   📊 Step 1/4: Running static analysis...")
         output = self._run_static_analysis(state, language, output)
 
         # Python-only: auto-fix simple pyflakes errors
@@ -101,6 +104,8 @@ class TesterAgent(BaseAgent):
 
         # Static errors remain → skip test runner
         if output.static_analysis_output:
+            error_count = len(output.static_analysis_output.split('\n'))
+            print(f"   ❌ {error_count} static error(s) found - test run skipped")
             state.apply(output)
             state.log(
                 self.name,
@@ -109,15 +114,19 @@ class TesterAgent(BaseAgent):
             return state
 
         # ── Step 2: Generate test files ───────────────────────────────────
+        print(f"\n   📊 Step 2/4: Generating test files...")
         if not state.test_files or state.retry_count > 0:
             output = self._generate_tests(state, language, output)
 
         # ── Step 3: Flush to disk ─────────────────────────────────────────
+        print(f"\n   📊 Step 3/4: Writing test files to disk...")
         # Always flush to disk — if project_root is empty, use "."
         flush_root = state.project_root or "."
         self._flush_to_disk(state, output, language, project_root=flush_root)
+        print(f"   ✓ Test files written")
 
         # ── Step 4: Run tests ─────────────────────────────────────────────
+        print(f"\n   📊 Step 4/4: Running test suite...")
         result = run_tests(project_root=flush_root, language=language)
         output.test_output = result
 
@@ -126,10 +135,15 @@ class TesterAgent(BaseAgent):
                 f"STDOUT:\n{result.get('stdout', '')}\n\nSTDERR:\n{result.get('stderr', '')}"
             )
             state.apply(output)
+            error_msg = result.get('stderr', '') or result.get('stdout', '')[:200]
+            print(f"\n   ❌ Tests FAILED")
+            if error_msg:
+                print(f"   Error: {error_msg.split(chr(10))[0]}")
             state.log(self.name, notes=f"RUNTIME FAIL (attempt {state.retry_count + 1})")
         else:
             output.error_log = None
             state.apply(output)
+            print(f"   ✅ All tests PASSED")
             state.log(self.name, notes="PASS — all tests green")
 
         return state
