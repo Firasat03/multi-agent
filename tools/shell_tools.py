@@ -12,6 +12,8 @@ Provides:
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -19,6 +21,16 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Optional
+
+
+# ─── Caching for static analysis (avoid re-checking unchanged files) ──────────
+_ANALYSIS_CACHE: dict[str, dict] = {}  # hash(files) -> result
+
+
+def _compute_files_hash(files: dict[str, str]) -> str:
+    """Compute a hash of file contents for caching purposes."""
+    content = json.dumps(files, sort_keys=True)
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 # ─── run_command ──────────────────────────────────────────────────────────────
@@ -170,9 +182,16 @@ def run_static_analysis(
     then pyflakes for undefined names / unused imports if installed.
     For other languages: basic structural sanity check (non-empty, no placeholders).
 
+    Results are cached by file content hash to avoid re-analysis of unchanged code.
+
     Returns:
         {has_errors: bool, errors: list[str]}
     """
+    # Check cache first
+    cache_key = _compute_files_hash(files)
+    if cache_key in _ANALYSIS_CACHE:
+        return _ANALYSIS_CACHE[cache_key]
+    
     errors: list[str] = []
 
     if language == "python":
@@ -183,7 +202,9 @@ def run_static_analysis(
     else:
         errors.extend(_generic_sanity_check(files, language))
 
-    return {"has_errors": bool(errors), "errors": errors}
+    result = {"has_errors": bool(errors), "errors": errors}
+    _ANALYSIS_CACHE[cache_key] = result
+    return result
 
 
 def _python_ast_check(files: dict[str, str]) -> list[str]:

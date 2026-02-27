@@ -6,6 +6,7 @@ Changes vs original:
   - Static analysis result is validated before being stored (no silent empty-string storage)
   - Auto-fix pyflakes now re-runs static analysis after patching to confirm fixes
   - Language resolution is separated and logged explicitly
+  - Language configurations moved to config.py (single source of truth)
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import os
 
 from agents.base_agent import BaseAgent
-from config import Status
+from config import Status, LANGUAGE_CONFIG
 from state import PipelineState, TesterOutput
 from tools.file_tools import write_file
 from tools.shell_tools import (
@@ -22,46 +23,6 @@ from tools.shell_tools import (
     run_static_analysis,
     run_tests,
 )
-
-
-_LANG_TEST_FRAMEWORK: dict[str, str] = {
-    "python":  "pytest",
-    "java":    "JUnit 5 + Mockito",
-    "kotlin":  "JUnit 5 + MockK",
-    "nodejs":  "Jest (TypeScript / JavaScript)",
-    "go":      "Go testing package (table-driven tests)",
-    "rust":    "Rust built-in #[test] + cargo test",
-    "csharp":  "xUnit + Moq",
-    "ruby":    "RSpec",
-    "php":     "PHPUnit",
-    "unknown": "the most appropriate testing framework for this language",
-}
-
-_LANG_TEST_FOLDER: dict[str, str] = {
-    "python":  "tests/",
-    "java":    "src/test/java/",
-    "kotlin":  "src/test/kotlin/",
-    "nodejs":  "__tests__/",
-    "go":      "",
-    "rust":    "tests/",
-    "csharp":  "Tests/",
-    "ruby":    "spec/",
-    "php":     "tests/",
-    "unknown": "tests/",
-}
-
-_LANG_TEST_EXT: dict[str, str] = {
-    "python":  ".py",
-    "java":    ".java",
-    "kotlin":  ".kt",
-    "nodejs":  ".test.ts",
-    "go":      "_test.go",
-    "rust":    ".rs",
-    "csharp":  ".cs",
-    "ruby":    "_spec.rb",
-    "php":     "Test.php",
-    "unknown": ".py",
-}
 
 
 class TesterAgent(BaseAgent):
@@ -217,9 +178,10 @@ class TesterAgent(BaseAgent):
     def _generate_tests(
         self, state: PipelineState, language: str, output: TesterOutput
     ) -> TesterOutput:
-        framework   = _LANG_TEST_FRAMEWORK.get(language, _LANG_TEST_FRAMEWORK["unknown"])
-        test_folder = _LANG_TEST_FOLDER.get(language, "tests/")
-        test_ext    = _LANG_TEST_EXT.get(language, ".py")
+        lang_config = LANGUAGE_CONFIG.get(language, LANGUAGE_CONFIG["unknown"])
+        framework   = lang_config["test_framework"]
+        test_folder = lang_config["test_folder"]
+        test_ext    = lang_config["test_extension"]
 
         files_block = "\n\n".join(
             f"# FILE: {path}\n```\n{content}\n```"

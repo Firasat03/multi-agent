@@ -204,13 +204,66 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
 
 
 def _format_files_truncated(files: dict[str, str]) -> str:
+    """
+    Format files for the debugger context window, with smart truncation.
+    
+    Strategy:
+    1. Always include small files (< 1KB) — likely where bugs are
+    2. Truncate large files first (preserve imports/decls, remove middle/end)
+    3. Stop adding files once budget exhausted
+    4. Show summary of what was truncated
+    """
     parts = []
     total_chars = 0
-    for path, content in files.items():
-        entry = f"### {path}\n```\n{content}\n```"
-        if total_chars + len(entry) > _MAX_FILES_CHARS:
-            parts.append(f"### {path}\n(content truncated — too large)")
-        else:
-            parts.append(entry)
-            total_chars += len(entry)
-    return "\n\n".join(parts)
+    truncated_files = []
+    
+    # Sort: small files first (high signal), then by size
+    sorted_files = sorted(files.items(), key=lambda x: (len(x[1]), x[0]))
+    
+    for path, content in sorted_files:
+        content_len = len(content)
+        
+        # Small files — always include
+        if content_len < 1_000:
+            entry = f"### {path}\n```\n{content}\n```"
+            if total_chars + len(entry) <= _MAX_FILES_CHARS:
+                parts.append(entry)
+                total_chars += len(entry)
+            else:
+                truncated_files.append(path)
+            continue
+        
+        # Large files — truncate imports + first 500 chars + last 300 chars
+        if content_len > 1_000:
+            lines = content.split('\n')
+            
+            # Keep imports/declarations (first ~10 lines)
+            import_lines = []
+            code_lines = []
+            for i, line in enumerate(lines[:15]):
+                if any(kw in line for kw in ('import', 'from ', 'require', 'def ', 'class ', 'package')):
+                    import_lines.append(line)
+                else:
+                    code_lines.append(line)
+            
+            # Construct truncated version
+            truncated_content = '\n'.join(import_lines + code_lines[:20])
+            truncated_content += f"\n\n... ({content_len - len(truncated_content)} chars omitted) ...\n\n"
+            truncated_content += '\n'.join(lines[-10:])  # Last 10 lines often have error hints
+            
+            entry = f"### {path} (truncated from {content_len} chars)\n```\n{truncated_content}\n```"
+            if total_chars + len(entry) <= _MAX_FILES_CHARS:
+                parts.append(entry)
+                total_chars += len(entry)
+            else:
+                truncated_files.append(path)
+    
+    result = "\n\n".join(parts)
+    
+    if truncated_files:
+        result += f"\n\n### Files not included (context limit reached):\n"
+        result += "\n".join(f"- {f}" for f in truncated_files[:5])
+        if len(truncated_files) > 5:
+            result += f"\n- ... and {len(truncated_files) - 5} more files"
+    
+    return result

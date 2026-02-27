@@ -155,15 +155,36 @@ START REVIEW:
 
 def _parse_verdict(text: str) -> str:
     """
-    Parse reviewer verdict. Defaults to REJECT if no verdict line is found.
-    A missing verdict means the LLM response was malformed — fail safe.
+    Parse reviewer verdict with fallback strategies. Defaults to REJECT if no verdict found.
+    
+    Tries multiple patterns:
+    1. Explicit "VERDICT: PASS|REJECT" line
+    2. Files_with_issues: None pattern
+    3. Summary context clues (No issues, All tests pass, etc.)
+    
+    Fail-safe: ambiguous response → REJECT and re-review
     """
-    match = re.search(r"VERDICT:\s*(PASS|REJECT)", text, re.IGNORECASE)
+    # Strategy 1: Explicit VERDICT line (primary)
+    match = re.search(r"VERDICT:\s*(PASS|REJECT)", text, re.IGNORECASE | re.MULTILINE)
     if match:
         return match.group(1).upper()
+    
+    # Strategy 2: FILES_WITH_ISSUES pattern
+    if "FILES_WITH_ISSUES: None" in text or "FILES_WITH_ISSUES:None" in text:
+        return "PASS"
+    
+    # Strategy 3: Check for explicit rejection patterns
+    if re.search(r"(REJECT|needs fixing|must fix|critical issue)", text, re.IGNORECASE):
+        return "REJECT"
+    
+    # Strategy 4: Check for explicit pass patterns
+    if re.search(r"(code is good|all standards|no issues|passes all|looks good)", text, re.IGNORECASE):
+        return "PASS"
+    
     # Fail-safe: ambiguous response → reject and re-review
     print(
-        "[Reviewer] Warning: No VERDICT line found in review response. "
-        "Defaulting to REJECT (fail-safe)."
+        "[Reviewer] ⚠️  Warning: Could not determine verdict from response. "
+        "Defaulting to REJECT (fail-safe). Response snippet: "
+        + text[:200].replace('\n', ' ')
     )
     return "REJECT"

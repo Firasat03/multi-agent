@@ -93,3 +93,68 @@ class Status:
     DONE        = "DONE"
     FAILED      = "FAILED"
     ABORTED     = "ABORTED"
+
+# ─── Language Configuration (single source of truth) ─────────────────────────
+# Consolidates test frameworks, folder paths, and file extensions per language
+LANGUAGE_CONFIG: dict[str, dict[str, str]] = {
+    "python": {
+        "test_framework": "pytest",
+        "test_folder": "tests/",
+        "test_extension": ".py",
+        "static_analyzer": "pylint / pyflakes",
+    },
+    "java": {
+        "test_framework": "JUnit 5 + Mockito",
+        "test_folder": "src/test/java/",
+        "test_extension": ".java",
+        "static_analyzer": "semgrep (Java ruleset)",
+    },
+    "kotlin": {
+        "test_framework": "JUnit 5 + MockK",
+        "test_folder": "src/test/kotlin/",
+        "test_extension": ".kt",
+        "static_analyzer": "semgrep (Kotlin ruleset)",
+    },
+    "nodejs": {
+        "test_framework": "Jest (TypeScript / JavaScript)",
+        "test_folder": "__tests__/",
+        "test_extension": ".test.ts",
+        "static_analyzer": "semgrep (Node.js ruleset)",
+    },
+    "go": {
+        "test_framework": "Go testing package (table-driven tests)",
+        "test_folder": "",
+        "test_extension": "_test.go",
+        "static_analyzer": "gofmt + go vet",
+    },
+    "rust": {
+        "test_framework": "Rust built-in #[test] + cargo test",
+        "test_folder": "tests/",
+        "test_extension": ".rs",
+        "static_analyzer": "cargo clippy",
+    },
+    "csharp": {
+        "test_framework": "xUnit + Moq",
+        "test_folder": "Tests/",
+        "test_extension": ".cs",
+        "static_analyzer": "roslyn analyzers",
+    },
+    "ruby": {
+        "test_framework": "RSpec",
+        "test_folder": "spec/",
+        "test_extension": "_spec.rb",
+        "static_analyzer": "rubocop",
+    },
+    "php": {
+        "test_framework": "PHPUnit",
+        "test_folder": "tests/",
+        "test_extension": "Test.php",
+        "static_analyzer": "php -l (lint)",
+    },
+    "unknown": {
+        "test_framework": "the most appropriate testing framework for this language",
+        "test_folder": "tests/",
+        "test_extension": ".py",
+        "static_analyzer": "basic sanity checks",
+    },
+}
