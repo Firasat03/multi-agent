@@ -28,11 +28,15 @@ class ArchitectAgent(BaseAgent):
         "production-grade, cloud-native backend systems in Python, Java, Node.js, Go, "
         "Kotlin, Rust, C#, Ruby, and PHP. "
         "Your job is to analyse a task and produce:\n"
-        "  1. A precise, minimal implementation plan (JSON array)\n"
+        "  1. A precise implementation plan (JSON array)\n"
         "  2. A numbered Task Checklist\n"
         "  3. A concise human-readable summary\n\n"
         "Think carefully about: files to create/modify, API contracts, DB schema changes, "
         "auth/security considerations, error handling strategy, and scope of work. "
+        "CRITICAL: You MUST include essential infrastructure and configuration files in your plan. "
+        "If a task requires new dependencies or config properties, you MUST modify or create: "
+        "Java (pom.xml, application.yml), Python (requirements.txt, .env), "
+        "Node (package.json, .env), Go (go.mod), etc. "
         "Use idiomatic patterns for the requested language. "
         "Never skip error handling or validation. "
         "Always output all three parts in the exact format requested."
@@ -101,6 +105,10 @@ Produce a JSON ARRAY (and nothing else) — a list of plan items, each with:
   - "description":    detailed description of what this file does / what to change
   - "api_contract":   full API signature if applicable, else ""
   - "scope_estimate": approximate lines of code, else ""
+
+IMPORTANT: If the task requires new libraries, environment variables, or configuration settings, 
+ensure your plan includes the corresponding infrastructure files (e.g., pom.xml, requirements.txt, 
+package.json, go.mod, application.yml, .env, etc.).
 """
         try:
             raw_plan, plan_tokens = self._call_llm_structured(

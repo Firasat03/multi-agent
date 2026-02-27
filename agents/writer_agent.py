@@ -87,11 +87,36 @@ Output each updated file as:
     def _update_readme(self, state: PipelineState) -> int:
         readme_path = os.path.join(state.project_root, "README.md") if state.project_root else "README.md"
         existing = read_file(readme_path) if file_exists(readme_path) else ""
+        
+        # Format the plan for the prompt to give the LLM details about endpoints and files
+        plan_details = "\n".join([
+            f"- {item.file}: {item.description} (API: {item.api_contract or 'N/A'})"
+            for item in state.plan
+        ])
+
         prompt = f"""
-Update (or create) the README.md for:
+Update (or create) a professional, production-grade README.md for this project.
+
+CONEXT:
 TASK: {state.task_prompt}
-WHAT WAS IMPLEMENTED: {state.plan_summary}
-EXISTING README: {existing or "(empty)"}
+IMPLEMENTED FEATURES:
+{plan_details}
+
+YOUR TASK:
+Generate a complete README.md that includes:
+1. # Project Title (from the task)
+2. ## Overview: What this project does.
+3. ## Requirements: Necessary runtimes (e.g., Python 3.9+, Node 18, Java 17) and dependencies.
+4. ## Setup & Run:
+   - Specific commands to install dependencies.
+   - Specific commands to start the application.
+   - Specific commands to run tests.
+5. ## API Documentation:
+   - A table or list of all endpoints, their methods, and expected request/response shapes (based on the implemented features listed above).
+6. ## Project Structure: Brief description of key files.
+
+EXISTING README (if any):
+{existing or "(empty)"}
 
 Output ONLY the complete updated README inside a ```markdown block.
 """

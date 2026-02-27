@@ -203,31 +203,23 @@ CURRENT SOURCE FILES:
 
 YOUR TASK:
 1. Review the fix instructions
-2. Identify which files need updates
-3. Regenerate those files with the recommended fixes applied
+2. Identify which specific files need updates
+3. Regenerate ONLY those files with the recommended fixes applied
 4. Return updated files in the format below
+
+IMPORTANT: Do NOT regenerate files that do not require changes. Files you do not include in your response will be preserved exactly as they are. This is critical to stay within token limits.
 
 ─────────────────────────────────────────────────────────────────────
 OUTPUT FORMAT:
 
 # FILE: src/auth/login.py
 ```python
-import requests
-from utils import validate_token
-
-def login(username: str, password: str):
-    if not username or not password:
-        raise ValueError("Missing credentials")
-    user = validate_token(username)
-    return {{"user_id": user.id}}
+<complete updated content>
 ```
 
 # FILE: src/config.py
 ```python
-import os
-
-DATABASE_URL = os.getenv('DATABASE_URL')
-SECURE_MODE = True
+<complete updated content>
 ```
 
 GUIDELINES:
@@ -238,10 +230,10 @@ GUIDELINES:
 5. Separate multiple files with a blank line
 6. Provide only FILE blocks, no additional text
 
-FILES TO UPDATE:
+FILES CURRENTLY IN PROJECT:
 {', '.join(state.generated_files.keys()) or 'applicable files'}
 
-Please provide the updated files:
+Please provide the updated files (ONLY for those being modified):
 """
         print(f"\n🔧 Coder: Applying fixes from Debugger...")
         response_text, tokens = self._call_llm(state, prompt)

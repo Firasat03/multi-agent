@@ -41,7 +41,10 @@ class DebuggerAgent(BaseAgent):
         "  • Actionable (Coder can implement directly without ambiguity)\n"
         "  • Minimal (fix only what's broken, don't refactor)\n"
         "  • Complete (if you identify the fix, describe it fully)\n\n"
-        "OUTPUT: Structured analysis → FIX INSTRUCTIONS → CONFIDENCE score (1-5)"
+        "OUTPUT: Structured analysis → FIX INSTRUCTIONS → CONFIDENCE score (1-5)\n\n"
+        "INFRASTRUCTURE ERRORS:\n"
+        "If you see errors like 'Command not found', 'ModuleNotFoundError', or dependency failures, "
+        "you MUST include infrastructure files (pom.xml, requirements.txt, etc.) in your fix instructions."
     )
 
     def run(self, state: PipelineState) -> PipelineState:
@@ -66,10 +69,13 @@ class DebuggerAgent(BaseAgent):
             )
         )
 
+        rules_context = f"\nUSER CODING RULES (MANDATORY):\n{state.user_rules}\n" if state.user_rules else ""
+
         prompt = f"""
 A test stage failed. Perform root-cause analysis and produce PRECISE fix instructions 
 that the Coder can implement immediately.
 
+{rules_context}
 ORIGINAL TASK: {state.task_prompt}
 
 ARCHITECT'S PLAN:
@@ -121,8 +127,9 @@ CRITICAL RULES:
 4. Then "ANALYSIS:" (2-3 paragraphs)
 5. Then "FIX INSTRUCTIONS:"
 6. Each file fix preceded by "---FILE: <path>---" (exactly this format)
-7. End with "CONFIDENCE: <1-5>" (single digit score)
-8. The Coder searches for 'FIX INSTRUCTIONS:' — proper formatting is critical
+7. If infrastructure files need changes, include them here.
+8. End with "CONFIDENCE: <1-5>" (single digit score)
+9. The Coder searches for 'FIX INSTRUCTIONS:' — proper formatting is critical
 
 FORMAT CHECK before responding:
   ☐ Starts with "ERROR CATEGORY:"

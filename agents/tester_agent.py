@@ -83,6 +83,8 @@ class TesterAgent(BaseAgent):
             "  - Never depend on a live database, network, or real filesystem\n"
             "  - Each test must document the scenario it covers (docstring or comment)\n"
             "  - Use the idiomatic setup/teardown mechanism for the language\n"
+            "  - If there are many files, prioritize testing core business logic and critical edges.\n"
+            "  - Check if the project needs new test-scoped dependencies (e.g., pytest-mock, Mockito) and note them.\n"
             "Output each file inside a fenced code block preceded by: # FILE: <relative/path>"
         )
 
@@ -234,11 +236,14 @@ TEST FILE EXTENSION: {test_ext}
 
 TASK CONTEXT: {state.task_prompt}
 
-ARCHITECT'S PLAN SUMMARY:
-{state.plan_summary}
-
 SOURCE FILES:
 {files_block}
+
+INSTRUCTIONS:
+- Generate a comprehensive but token-efficient test suite.
+- If the project is large, focus on the most important logic files.
+- Ensure all external mocks are correctly implemented.
+- If you need new test dependencies that aren't in the project, mention them in a comment.
 
 ─────────────────────────────────────────────────────────────────────
 MANDATORY OUTPUT FORMAT (machine-parsed, no exceptions)

@@ -42,11 +42,14 @@ class ReviewerAgent(BaseAgent):
         "Be strict but constructive. Quote the specific line or function causing the issue.\n\n"
         "CRITICAL — MANDATORY OUTPUT FORMAT:\n"
         "You MUST end your review with EXACTLY this format (one section per line):\n\n"
+        "FILES_WITH_ISSUES: <Comma-separated list of relative paths needing fixes, or 'None'>\n"
         "VERDICT: PASS\n\n"
         "OR if there are issues:\n\n"
+        "FILES_WITH_ISSUES: src/auth/login.py, src/config.py\n"
         "VERDICT: REJECT\n"
         "REASON: <Clear, specific explanation of the critical issue that must be fixed>\n\n"
         "The machine parser looks for exactly 'VERDICT: PASS' or 'VERDICT: REJECT'.\n"
+        "The 'FILES_WITH_ISSUES' line is used to tell the Coder which files to regenerate.\n"
         "If you cannot decide, default to REJECT.\n"
         "DO NOT output any other text after the VERDICT line."
     )
@@ -68,11 +71,13 @@ class ReviewerAgent(BaseAgent):
         print(f"\n📋 Reviewer: Analyzing {len(state.generated_files)} file(s)...")
         print(f"   Files to review: {', '.join(state.generated_files.keys())}")
 
+        rules_context = f"\nUSER CODING RULES (MANDATORY):\n{state.user_rules}\n" if state.user_rules else ""
+
         prompt = f"""
 Review the following generated backend code strictly.
 
 ORIGINAL TASK: {state.task_prompt}
-
+{rules_context}
 ARCHITECT'S PLAN SUMMARY:
 {state.plan_summary}
 
@@ -87,9 +92,11 @@ MANDATORY OUTPUT FORMAT (machine-parsed, no exceptions)
 You MUST output review analysis, then END with EXACTLY ONE of these:
 
 Example 1 (if code is good):
+  FILES_WITH_ISSUES: None
   VERDICT: PASS
 
 Example 2 (if code has issues):
+  FILES_WITH_ISSUES: src/auth/login.py
   VERDICT: REJECT
   REASON: Missing authentication guard in login handler (line 42). Allows unauthorized access.
 
