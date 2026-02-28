@@ -77,6 +77,16 @@ ENABLE_BANDIT       = os.getenv("ENABLE_BANDIT",    "true").lower() == "true"
 ENABLE_PIP_AUDIT    = os.getenv("ENABLE_PIP_AUDIT", "true").lower() == "true"
 BANDIT_MIN_SEVERITY = os.getenv("BANDIT_MIN_SEVERITY", "MEDIUM")   # LOW | MEDIUM | HIGH
 
+# ─── Skippable Agents (optional, can be disabled per run) ──────────────────────
+# MANDATORY agents that CANNOT be skipped: Architect, Coder, Reviewer
+# Set to False to disable an agent, True to enable it (default)
+SKIP_SECURITY    = os.getenv("SKIP_SECURITY",    "false").lower() == "true"
+SKIP_TESTER      = os.getenv("SKIP_TESTER",      "false").lower() == "true"
+SKIP_DEBUGGER    = os.getenv("SKIP_DEBUGGER",    "false").lower() == "true"
+SKIP_INTEGRATION = os.getenv("SKIP_INTEGRATION", "false").lower() == "true"
+SKIP_WRITER      = os.getenv("SKIP_WRITER",      "false").lower() == "true"
+SKIP_DEVOPS      = os.getenv("SKIP_DEVOPS",      "false").lower() == "true"
+
 # ─── Pipeline status enum values ──────────────────────────────────────────────
 class Status:
     INIT        = "INIT"

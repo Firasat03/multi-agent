@@ -11,10 +11,27 @@ Changes vs original:
   - Dead-letter: final failure state written to .workflow/<run-id>/FAILURE.json
   - Debugger escalation (output.escalate) handled here, not inside the agent
   - review_verdict read from state.review_verdict (not re-parsed from review_notes)
+  - Skip agent functionality: Optional agents can be disabled via config
 
 Agent execution order:
-  Architect → [Human Gate] → Coder → Reviewer → Security
-  → Tester → Debugger (loop) → Integration (loop) → Writer → DevOps (opt-in)
+  Architect → [Human Gate] → Coder → Reviewer → Security (skip: SKIP_SECURITY)
+  → Tester → Debugger (loop, skip: SKIP_DEBUGGER)
+  → Integration (loop, skip: SKIP_INTEGRATION)
+  → Writer (skip: SKIP_WRITER)
+  → DevOps (skip: SKIP_DEVOPS)
+
+MANDATORY agents (CANNOT be skipped):
+  - Architect: Creates the implementation plan
+  - Coder: Generates code from the plan
+  - Reviewer: Reviews code for quality and correctness
+
+OPTIONAL agents that can be disabled via config or env vars:
+  - Security: Security scanning (env: SKIP_SECURITY=true)
+  - Tester: Unit and integration tests (env: SKIP_TESTER=true)
+  - Debugger: Fixes failed tests (env: SKIP_DEBUGGER=true)
+  - Integration: Integration tests (env: SKIP_INTEGRATION=true)
+  - Writer: Documentation generation (env: SKIP_WRITER=true)
+  - DevOps: Docker & deployment setup (env: SKIP_DEVOPS=true)
 """
 
 from __future__ import annotations
@@ -35,6 +52,12 @@ from config import (
     MAX_DEBUG_RETRIES,
     MAX_RUN_COST_USD,
     MAX_REVIEW_RETRIES,
+    SKIP_DEBUGGER,
+    SKIP_DEVOPS,
+    SKIP_INTEGRATION,
+    SKIP_SECURITY,
+    SKIP_TESTER,
+    SKIP_WRITER,
     Status,
 )
 from state import PipelineState
@@ -288,7 +311,9 @@ def run(
         # STAGE 3 — Security scan (SAST + dep vulnerabilities)
         # Routes back to Coder if HIGH findings exist
         # ═══════════════════════════════════════════════════════════════════
-        if state.status not in (Status.TESTING, Status.DEBUGGING,
+        if SKIP_SECURITY:
+            console.print("[yellow]⏭️  Skipping Stage 3 — Security Scanner (disabled)[/yellow]")
+        elif state.status not in (Status.TESTING, Status.DEBUGGING,
                                 Status.INTEGRATION, Status.WRITING,
                                 Status.DEVOPS, Status.DONE,
                                 Status.FAILED, Status.ABORTED):
@@ -324,7 +349,9 @@ def run(
         # ═══════════════════════════════════════════════════════════════════
         # STAGE 4 — Tester (unit + static) → Debugger loop
         # ═══════════════════════════════════════════════════════════════════
-        if state.status in (Status.REVIEWING, Status.CODING, Status.SECURITY,
+        if SKIP_TESTER:
+            console.print("[yellow]⏭️  Skipping Stage 4 — Tester (disabled)[/yellow]")
+        elif state.status in (Status.REVIEWING, Status.CODING, Status.SECURITY,
                             Status.TESTING, Status.DEBUGGING, Status.INTEGRATION):
             attempts = state.retry_count
 
@@ -352,6 +379,18 @@ def run(
                         return _finalize(state, ctx)
 
                     console.print("[red]Unit tests failed — invoking Debugger...[/red]")
+                    
+                    if SKIP_DEBUGGER:
+                        console.print("[yellow]⏭️  Debugger disabled — escalating to human instead[/yellow]")
+                        state.status = Status.FAILED
+                        state.record_failure(
+                            stage="TESTING",
+                            agent="Orchestrator",
+                            error_summary="Unit tests failed and Debugger is disabled",
+                            error_detail=state.error_log or "",
+                        )
+                        return _finalize(state, ctx)
+                    
                     console.rule(f"[bold red]🐛 Debugger — cycle {attempts + 1}[/bold red]")
                     state = ctx.run_agent(debugger, state, f"debugger_unit_{attempts + 1}")
                     ctx.check_cost_budget(state)
@@ -370,6 +409,10 @@ def run(
                 console.print("[green]✅ Unit / static tests passed.[/green]")
 
                 # ── 4b: Integration tests ─────────────────────────────────
+                if SKIP_INTEGRATION:
+                    console.print("[yellow]⏭️  Skipping Integration Tests (disabled)[/yellow]")
+                    break
+                    
                 console.rule("[bold cyan]🔗 Integration Tests[/bold cyan]")
                 state = ctx.run_agent(integrator, state, f"integration_{attempts + 1}")
                 ctx.check_cost_budget(state)
@@ -393,6 +436,18 @@ def run(
                     return _finalize(state, ctx)
 
                 console.print("[red]Integration tests failed — invoking Debugger...[/red]")
+                
+                if SKIP_DEBUGGER:
+                    console.print("[yellow]⏭️  Debugger disabled — escalating to human instead[/yellow]")
+                    state.status = Status.FAILED
+                    state.record_failure(
+                        stage="INTEGRATION",
+                        agent="Orchestrator",
+                        error_summary="Integration tests failed and Debugger is disabled",
+                        error_detail=state.integration_test_output or "",
+                    )
+                    return _finalize(state, ctx)
+                
                 console.rule(f"[bold red]🐛 Debugger — integration cycle {attempts + 1}[/bold red]")
                 state = ctx.run_agent(debugger, state, f"debugger_integration_{attempts + 1}")
                 ctx.check_cost_budget(state)
@@ -410,7 +465,9 @@ def run(
         # ═══════════════════════════════════════════════════════════════════
         # STAGE 5 — Writer
         # ═══════════════════════════════════════════════════════════════════
-        if state.status not in (Status.WRITING, Status.DEVOPS, Status.DONE,
+        if SKIP_WRITER:
+            console.print("[yellow]⏭️  Skipping Stage 5 — Writer (disabled)[/yellow]")
+        elif state.status not in (Status.WRITING, Status.DEVOPS, Status.DONE,
                                 Status.FAILED, Status.ABORTED):
             console.rule("[bold]📝 Stage 5 — Writer[/bold]")
             state = ctx.run_agent(writer, state, "writer")
@@ -419,9 +476,10 @@ def run(
         # ═══════════════════════════════════════════════════════════════════
         # STAGE 6 — DevOps (opt-in)
         # ═══════════════════════════════════════════════════════════════════
-        if state.devops_mode and state.status not in (
-            Status.DONE, Status.FAILED, Status.ABORTED
-        ):
+        if SKIP_DEVOPS or not state.devops_mode:
+            if SKIP_DEVOPS:
+                console.print("[yellow]⏭️  Skipping Stage 6 — DevOps (disabled)[/yellow]")
+        elif state.status not in (Status.DONE, Status.FAILED, Status.ABORTED):
             console.rule(
                 f"[bold cyan]🐳 Stage 6 — DevOps (mode: {state.devops_mode})[/bold cyan]"
             )

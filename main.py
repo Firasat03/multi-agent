@@ -56,6 +56,16 @@ Examples:
                         help="Max USD to spend per run (0 = unlimited). Example: --max-cost 2.00")
     parser.add_argument("--no-security",  action="store_true",
                         help="Skip the security scanning stage (SAST + dep audit)")
+    parser.add_argument("--skip-tester",      action="store_true",
+                        help="Skip unit and integration testing stages")
+    parser.add_argument("--skip-debugger",    action="store_true",
+                        help="Skip debugger (escalate to human on test failures)")
+    parser.add_argument("--skip-integration", action="store_true",
+                        help="Skip integration tests (run unit tests only)")
+    parser.add_argument("--skip-writer",      action="store_true",
+                        help="Skip documentation generation (README, CHANGELOG)")
+    parser.add_argument("--skip-devops",      action="store_true",
+                        help="Skip DevOps setup (Docker, Kubernetes)")
     parser.add_argument("--resume",       type=str, default=None)
     parser.add_argument("--list-runs",    action="store_true")
     parser.add_argument(
@@ -95,9 +105,20 @@ def main() -> None:
     if args.max_cost is not None:
         config.MAX_RUN_COST_USD = args.max_cost
     if args.no_security:
-        config.ENABLE_BANDIT   = False
+        config.SKIP_SECURITY = True
+        config.ENABLE_BANDIT = False
         config.ENABLE_PIP_AUDIT = False
         os.environ["SECURITY_BLOCK_ON_HIGH"] = "false"
+    if args.skip_tester:
+        config.SKIP_TESTER = True
+    if args.skip_debugger:
+        config.SKIP_DEBUGGER = True
+    if args.skip_integration:
+        config.SKIP_INTEGRATION = True
+    if args.skip_writer:
+        config.SKIP_WRITER = True
+    if args.skip_devops:
+        config.SKIP_DEVOPS = True
 
     # ── --list-runs ───────────────────────────────────────────────────────
     if args.list_runs:
@@ -139,7 +160,17 @@ def main() -> None:
     if args.language != "auto":
         console.print(f"[cyan]>> Language: [bold]{args.language}[/bold][/cyan]")
     if args.no_security:
-        console.print("[yellow]⚠ Security scanning disabled (--no-security)[/yellow]")
+        console.print("[yellow]⏭️  Skipping Security Scanner[/yellow]")
+    if args.skip_tester:
+        console.print("[yellow]⏭️  Skipping Tester (no unit/integration tests)[/yellow]")
+    if args.skip_debugger:
+        console.print("[yellow]⏭️  Skipping Debugger (escalate on failures)[/yellow]")
+    if args.skip_integration:
+        console.print("[yellow]⏭️  Skipping Integration Tests[/yellow]")
+    if args.skip_writer:
+        console.print("[yellow]⏭️  Skipping Writer (no docs)[/yellow]")
+    if args.skip_devops:
+        console.print("[yellow]⏭️  Skipping DevOps[/yellow]")
     if config.MAX_RUN_COST_USD > 0:
         console.print(f"[cyan]💰 Cost budget: ${config.MAX_RUN_COST_USD:.2f}[/cyan]")
 
