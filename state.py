@@ -66,6 +66,7 @@ class ArchitectOutput(BaseModel):
 
 class CoderOutput(BaseModel):
     generated_files: dict[str, str] = Field(default_factory=dict)
+    modified_files: set[str] = Field(default_factory=set)  # Which files changed in this run
 
 
 class ReviewerOutput(BaseModel):
@@ -192,6 +193,10 @@ class PipelineState(BaseModel):
     devops_mode: Optional[str] = None
     devops_files: dict[str, str] = Field(default_factory=dict)
 
+    # ── Optimization: Track which source files changed ────────────────────────
+    # Set by Coder when it updates source files (for test regeneration efficiency)
+    modified_source_files: set[str] = Field(default_factory=set)
+
     # ── Cost & audit ─────────────────────────────────────────────────────────
     total_tokens_used: int = 0
     estimated_cost_usd: float = 0.0
@@ -259,6 +264,7 @@ class PipelineState(BaseModel):
 
         elif isinstance(output, CoderOutput):
             self.generated_files.update(output.generated_files)
+            self.modified_source_files = output.modified_files  # Track which files changed
 
         elif isinstance(output, ReviewerOutput):
             self.review_notes = output.review_notes

@@ -112,7 +112,10 @@ class CoderAgent(BaseAgent):
                     ) from exc
 
         print(f"\n📝 Coder complete: {len(new_files)} files generated")
-        output = CoderOutput(generated_files=new_files)
+        output = CoderOutput(
+            generated_files=new_files,
+            modified_files=set(new_files.keys())  # All newly generated files
+        )
         state.apply(output)
         state.fix_instructions = None
         state.log(
@@ -304,7 +307,10 @@ Please provide the files now:
             for fpath in fixed_files:
                 print(f"   • {fpath}")
 
-        output = CoderOutput(generated_files=fixed_files)
+        output = CoderOutput(
+            generated_files=fixed_files,
+            modified_files=set(fixed_files.keys())  # Only these files were fixed
+        )
         state.apply(output)
         state.fix_instructions = None
         state.log(

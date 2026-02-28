@@ -78,8 +78,19 @@ class TesterAgent(BaseAgent):
 
         # ── Step 2: Generate test files ───────────────────────────────────
         print(f"\n   📊 Step 2/4: Generating test files...")
-        if not state.test_files or state.retry_count > 0:
-            output = self._generate_tests(state, language, output)
+        # On first run: generate tests for all files
+        # On retry: only regenerate tests for files that were modified by Coder
+        should_regenerate = not state.test_files or (
+            state.retry_count > 0 and state.modified_source_files
+        )
+        if should_regenerate:
+            # Determine which source files to generate tests for
+            files_to_test = (
+                state.modified_source_files
+                if (state.retry_count > 0 and state.modified_source_files)
+                else None  # None = all files
+            )
+            output = self._generate_tests(state, language, output, files_to_test=files_to_test)
 
         # ── Step 3: Flush to disk ─────────────────────────────────────────
         print(f"\n   📊 Step 3/4: Writing test files to disk...")
@@ -176,16 +187,41 @@ class TesterAgent(BaseAgent):
     # ── Test generation ───────────────────────────────────────────────────
 
     def _generate_tests(
-        self, state: PipelineState, language: str, output: TesterOutput
+        self, state: PipelineState, language: str, output: TesterOutput,
+        files_to_test: set[str] | None = None
     ) -> TesterOutput:
+        """
+        Generate test files for the given source files.
+        
+        Args:
+            files_to_test: If None, generate tests for all source files.
+                          If set, only generate tests for specified files.
+                          (Optimization: on retries, only regenerate tests for modified files)
+        """
         lang_config = LANGUAGE_CONFIG.get(language, LANGUAGE_CONFIG["unknown"])
         framework   = lang_config["test_framework"]
         test_folder = lang_config["test_folder"]
         test_ext    = lang_config["test_extension"]
 
+        # Filter source files: use specified set or all files
+        source_files = state.generated_files.items()
+        if files_to_test:
+            source_files = [
+                (path, content) for path, content in source_files
+                if path in files_to_test
+            ]
+            print(f"   ℹ️  Regenerating tests for {len(files_to_test)} modified file(s)")
+        else:
+            print(f"   ℹ️  Generating tests for {len(state.generated_files)} file(s)")
+
+        if not source_files:
+            # No files to test
+            output.test_files = {}
+            return output
+
         files_block = "\n\n".join(
             f"# FILE: {path}\n```\n{content}\n```"
-            for path, content in state.generated_files.items()
+            for path, content in source_files
         )
 
         prompt = f"""
