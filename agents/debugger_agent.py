@@ -128,13 +128,21 @@ CONFIDENCE: 5
 CRITICAL RULES:
 1. Start with "ERROR CATEGORY:" (STATIC or RUNTIME)
 2. Follow with "ROOT CAUSE:" (1-2 sentences, be specific)
-3. List "AFFECTED FILES:" — comma-separated on ONE LINE (e.g., "file1.py, file2.py, file3.py")
+3. List "AFFECTED FILES:" — MANDATORY — comma-separated on ONE LINE (e.g., "file1.py, file2.py, file3.py")
+   - MUST identify at least one file, or write "AFFECTED FILES: File identification failed"
+   - Do NOT skip this line under any circumstances
 4. Then "ANALYSIS:" (2-3 paragraphs explaining the root cause)
 5. Then "FIX INSTRUCTIONS:" (empty line after this, then structured fixes below)
 6. Each file fix preceded by "---FILE: <path>---" (exactly this format, three dashes)
 7. If infrastructure files need changes (pom.xml, package.json, requirements.txt, etc.), include them
 8. End with "CONFIDENCE: <1-5>" (single digit score only)
-9. The Coder searches for 'FIX INSTRUCTIONS:' and '---FILE:' markers — formatting is critical
+9. The Coder searches for 'AFFECTED FILES:', 'FIX INSTRUCTIONS:', and '---FILE:' markers — all are critical
+
+IMPORTANT: Even if you cannot be certain about which files to fix, you MUST attempt to list them
+in the AFFECTED FILES line. The parser will extract this regardless of format. Examples:
+  ✓ AFFECTED FILES: pom.xml, src/main/java/com/example/auth/service/AuthService.java
+  ✓ AFFECTED FILES: looks like SecurityConfig.java, maybe also JwtTokenProvider.java
+  ✗ (skipping AFFECTED FILES line entirely — will fail parsing)
 
 FORMAT CHECK before responding:
   ☐ Starts with "ERROR CATEGORY:"
@@ -166,7 +174,7 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
                 parts = line.split('AFFECTED FILES:')[1]
                 for item in parts.split(','):
                     item = item.strip()
-                    if item and len(item) > 2:  # exclude empty or single-char items
+                    if item and len(item) > 2 and item.lower() != 'none':  # exclude empty or single-char items
                         affected.append(item)
         
         # Strategy 2: Extract from "---FILE: <path> ---" format lines
@@ -179,6 +187,18 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
                         affected.append(file_part)
                 except (IndexError, ValueError):
                     pass
+        
+        # Strategy 3: Extract file paths from the ANALYSIS section (fallback)
+        # Look for common patterns like "src/auth/...", "tests/...", etc.
+        if not affected:
+            import re as regex_mod
+            # Match common Java/Python file paths in the response
+            file_patterns = regex_mod.findall(
+                r'(?:src|tests)/[a-zA-Z0-9/_\-\.]+\.(?:java|py|ts|go)',
+                response_text,
+                regex_mod.IGNORECASE
+            )
+            affected.extend([f for f in file_patterns if len(f) > 2])
         
         # Deduplicate and format
         affected_str = ", ".join(sorted(set(affected))) if affected else "unknown"

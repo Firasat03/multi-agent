@@ -109,10 +109,18 @@ class TesterAgent(BaseAgent):
                 f"STDOUT:\n{result.get('stdout', '')}\n\nSTDERR:\n{result.get('stderr', '')}"
             )
             state.apply(output)
-            error_msg = result.get('stderr', '') or result.get('stdout', '')[:200]
+            # Extract error message for console (first 500 chars to show more context)
+            error_msg = result.get('stderr', '') or result.get('stdout', '')
+            error_msg = error_msg[:500] if error_msg else ""
             print(f"\n   ❌ Tests FAILED")
             if error_msg:
-                print(f"   Error: {error_msg.split(chr(10))[0]}")
+                # Show first line, or first 500 chars if it's all one line
+                first_line = error_msg.split('\n')[0] if '\n' in error_msg else error_msg
+                if len(first_line) > 100:
+                    # If first line is too long, truncate it
+                    print(f"   Error: {first_line[:100]}...")
+                else:
+                    print(f"   Error: {first_line}")
             state.log(self.name, notes=f"RUNTIME FAIL (attempt {state.retry_count + 1})")
         else:
             output.error_log = None

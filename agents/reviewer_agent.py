@@ -89,31 +89,49 @@ Perform a thorough review covering all 8 dimensions in your role description.
 ─────────────────────────────────────────────────────────────────────
 MANDATORY OUTPUT FORMAT (machine-parsed, no exceptions)
 
-You MUST output review analysis, then END with EXACTLY ONE of these:
+STEP 1: Write your detailed review (covering all 8 dimensions)
 
-Example 1 (if code is good):
-  FILES_WITH_ISSUES: None
-  VERDICT: PASS
+STEP 2: At the END, output EXACTLY ONE of these patterns on its own line:
 
-Example 2 (if code has issues):
-  FILES_WITH_ISSUES: src/auth/login.py
-  VERDICT: REJECT
-  REASON: Missing authentication guard in login handler (line 42). Allows unauthorized access.
+PATTERN A (if code is good, no issues):
+═════════════════════════════════════
+FILES_WITH_ISSUES: None
+VERDICT: PASS
+═════════════════════════════════════
 
-RULES:
-  • "VERDICT:" must be on its own line
-  • After VERDICT: line, add nothing else EXCEPT optional REASON: line for REJECT
-  • Do NOT use other formats like "VERDICT:PASS" or "VEREDICT:" (typos will fail)
-  • If uncertain, always use VERDICT: REJECT
+PATTERN B (if code has issues that need fixing):
+═════════════════════════════════════
+FILES_WITH_ISSUES: src/auth/login.py, src/config.py
+VERDICT: REJECT
+REASON: <one sentence: what is the critical issue>
+═════════════════════════════════════
 
-FORMAT CHECK before responding:
-  ☐ Review covers all 8 dimensions
-  ☐ Ends with "VERDICT: PASS" OR ("VERDICT: REJECT" + REASON: line)
-  ☐ No text after the REASON: line
-  ☐ VERDICT: word is spelled correctly
-─────────────────────────────────────────────────────────────────────
+CRITICAL RULES FOR THIS SECTION:
+  1. ONLY output one of the two patterns above
+  2. Do NOT output both patterns
+  3. VERDICT: must be exactly "VERDICT: PASS" or "VERDICT: REJECT" (no typos)
+  4. FILES_WITH_ISSUES line must come BEFORE VERDICT line
+  5. For REJECT cases, add a REASON: line that is ONE sentence max
+  6. Do NOT output any text AFTER the REASON: line
+  7. If unsure, always choose VERDICT: REJECT (fail-safe)
+  8. The dashes (═══) on the lines before/after help parsing
 
-START REVIEW:
+EXAMPLE 1 (PASS case):
+═════════════════════════════════════
+FILES_WITH_ISSUES: None
+VERDICT: PASS
+═════════════════════════════════════
+
+EXAMPLE 2 (REJECT case):
+═════════════════════════════════════
+FILES_WITH_ISSUES: src/auth/service/AuthService.java, src/auth/security/SecurityConfig.java
+VERDICT: REJECT
+REASON: Missing authentication on /login endpoint allows unauthorized token generation.
+═════════════════════════════════════
+
+DO NOT include any other text after the dashed lines.
+
+START YOUR REVIEW:
 """
         response_text, tokens = self._call_llm(state, prompt)
         verdict = _parse_verdict(response_text)
@@ -164,21 +182,36 @@ def _parse_verdict(text: str) -> str:
     
     Fail-safe: ambiguous response → REJECT and re-review
     """
-    # Strategy 1: Explicit VERDICT line (primary)
+    # Strategy 1: Look for dashed boundary format (new format)
+    # Pattern: ═════════...
+    #         FILES_WITH_ISSUES: ...
+    #         VERDICT: PASS|REJECT
+    #         [REASON: ...]
+    #         ═════════...
+    dashed_match = re.search(
+        r"═+\s*\n\s*FILES_WITH_ISSUES:\s*(.+?)\n\s*VERDICT:\s*(PASS|REJECT)",
+        text,
+        re.IGNORECASE | re.MULTILINE
+    )
+    if dashed_match:
+        verdict = dashed_match.group(2).upper()
+        return verdict
+    
+    # Strategy 2: Explicit VERDICT line (primary fallback)
     match = re.search(r"VERDICT:\s*(PASS|REJECT)", text, re.IGNORECASE | re.MULTILINE)
     if match:
         return match.group(1).upper()
     
-    # Strategy 2: FILES_WITH_ISSUES pattern
+    # Strategy 3: FILES_WITH_ISSUES pattern
     if "FILES_WITH_ISSUES: None" in text or "FILES_WITH_ISSUES:None" in text:
         return "PASS"
     
-    # Strategy 3: Check for explicit rejection patterns
-    if re.search(r"(REJECT|needs fixing|must fix|critical issue)", text, re.IGNORECASE):
+    # Strategy 4: Check for explicit rejection patterns
+    if re.search(r"(REJECT|needs fixing|must fix|critical issue|cannot pass|fails)", text, re.IGNORECASE):
         return "REJECT"
     
-    # Strategy 4: Check for explicit pass patterns
-    if re.search(r"(code is good|all standards|no issues|passes all|looks good)", text, re.IGNORECASE):
+    # Strategy 5: Check for explicit pass patterns
+    if re.search(r"(code is good|all standards|no issues|passes all|looks good|all files|acceptable|approved)", text, re.IGNORECASE):
         return "PASS"
     
     # Fail-safe: ambiguous response → reject and re-review
