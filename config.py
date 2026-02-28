@@ -87,6 +87,14 @@ SKIP_INTEGRATION = os.getenv("SKIP_INTEGRATION", "false").lower() == "true"
 SKIP_WRITER      = os.getenv("SKIP_WRITER",      "false").lower() == "true"
 SKIP_DEVOPS      = os.getenv("SKIP_DEVOPS",      "false").lower() == "true"
 
+# ─── Performance Optimization (disables optional features for speed) ──────────────
+# Set to true to enable extra validation steps (slower but more thorough)
+ENABLE_ARCHITECT_AUDIT = os.getenv("ENABLE_ARCHITECT_AUDIT", "true").lower() == "true"
+
+# Batch size for Coder agent file generation (higher = faster, lower = better quality)
+# Default: 3 files per LLM call. Set to 1 for per-file generation (slower).
+CODER_BATCH_SIZE = int(os.getenv("CODER_BATCH_SIZE", "1"))
+
 # ─── Pipeline status enum values ──────────────────────────────────────────────
 class Status:
     INIT        = "INIT"

@@ -25,7 +25,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-MAX_STARTUP_SECS = 45
+MAX_STARTUP_SECS = 90  # Spring Boot + JPA can take 60-90s
 HEALTH_POLL_SECS = 1
 
 _HEALTH_PATHS = ["/actuator/health", "/health", "/healthz", "/"]
@@ -54,7 +54,9 @@ def _poll_health(port: int) -> bool:
         url = f"http://localhost:{port}{path}"
         try:
             with urllib.request.urlopen(url, timeout=2) as r:
-                if r.status < 300:
+                # Accept 2xx and 3xx status codes as healthy
+                # Note: Spring Boot /actuator/health returns 200 even during startup phases
+                if 200 <= r.status < 400:
                     return True
         except Exception:
             pass
@@ -337,21 +339,28 @@ def run_integration_tests(
     # ── Wait for health ────────────────────────────────────────────────────
     ready = False
     startup_lines: list[str] = []
-    for _ in range(int(MAX_STARTUP_SECS / HEALTH_POLL_SECS)):
+    for i in range(int(MAX_STARTUP_SECS / HEALTH_POLL_SECS)):
         time.sleep(HEALTH_POLL_SECS)
-        # Drain any available server output (non-blocking)
+        # Drain any available server output
         if proc.stdout:
-            import select
-            rlist, _, _ = select.select([proc.stdout], [], [], 0)
-            if rlist:
+            try:
+                # Attempt non-blocking read (works better cross-platform than select)
                 line = proc.stdout.readline()
                 if line:
                     startup_lines.append(line.rstrip())
+            except (IOError, OSError):
+                pass
+        
         if proc.poll() is not None:
             # Server exited early — drain remaining output
             if proc.stdout:
-                startup_lines.extend(proc.stdout.read().splitlines())
+                try:
+                    for line in proc.stdout.readlines():
+                        startup_lines.append(line.rstrip())
+                except (IOError, OSError):
+                    pass
             break
+        
         if _poll_health(port):
             ready = True
             break

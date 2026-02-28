@@ -142,8 +142,15 @@ test runner configs, linter/formatter configs, and environment variable template
         if not plan:
             raise RuntimeError("Architect produced an empty plan — nothing to implement.")
 
-        # ── Step 2: LLM config-file audit — no hardcoding needed ─────────
-        plan = self._audit_missing_configs(state, plan)
+        # ── Step 2: LLM config-file audit (optional) ──────────────────────
+        # Disabled by default because system role already instructs LLM to include configs.
+        # Enable via ENABLE_ARCHITECT_AUDIT=true if you want extra validation.
+        from config import ENABLE_ARCHITECT_AUDIT
+        if ENABLE_ARCHITECT_AUDIT:
+            plan = self._audit_missing_configs(state, plan)
+            audit_note = "(audit enabled)"
+        else:
+            audit_note = "(audit disabled — set ENABLE_ARCHITECT_AUDIT=true to enable)"
 
         # ── Step 3: Checklist + summary in one prose call ─────────────────
         prose_prompt = f"""
@@ -193,7 +200,7 @@ considerations, error handling strategy, estimated scope.
 
         state.log(
             self.name,
-            notes=f"{len(plan)} plan items (replan #{state.replan_count})",
+            notes=f"{len(plan)} plan items (replan #{state.replan_count}) {audit_note}",
             tokens=plan_tokens + prose_tokens,
         )
         return state

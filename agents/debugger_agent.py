@@ -105,7 +105,7 @@ EXAMPLE OUTPUT:
 
 ERROR CATEGORY: STATIC
 ROOT CAUSE: Missing import statement for 'validate_token' function used on line 42
-AFFECTED FILES: src/auth.py
+AFFECTED FILES: src/auth.py, src/utils.py
 
 ANALYSIS:
 The code imports nothing from utils module (line 1).
@@ -118,27 +118,32 @@ FIX INSTRUCTIONS:
 Line 1: Add this import at the top:
 from utils import validate_token
 
+---FILE: src/utils.py---
+Line 10: Remove the old implementation and replace with:
+def validate_token(token: str) -> bool:
+    # implementation...
+
 CONFIDENCE: 5
 
 CRITICAL RULES:
-1. Start with "ERROR CATEGORY:"
-2. Follow with "ROOT CAUSE:" (1-2 sentences)
-3. List "AFFECTED FILES:"
-4. Then "ANALYSIS:" (2-3 paragraphs)
-5. Then "FIX INSTRUCTIONS:"
-6. Each file fix preceded by "---FILE: <path>---" (exactly this format)
-7. If infrastructure files need changes, include them here.
-8. End with "CONFIDENCE: <1-5>" (single digit score)
-9. The Coder searches for 'FIX INSTRUCTIONS:' — proper formatting is critical
+1. Start with "ERROR CATEGORY:" (STATIC or RUNTIME)
+2. Follow with "ROOT CAUSE:" (1-2 sentences, be specific)
+3. List "AFFECTED FILES:" — comma-separated on ONE LINE (e.g., "file1.py, file2.py, file3.py")
+4. Then "ANALYSIS:" (2-3 paragraphs explaining the root cause)
+5. Then "FIX INSTRUCTIONS:" (empty line after this, then structured fixes below)
+6. Each file fix preceded by "---FILE: <path>---" (exactly this format, three dashes)
+7. If infrastructure files need changes (pom.xml, package.json, requirements.txt, etc.), include them
+8. End with "CONFIDENCE: <1-5>" (single digit score only)
+9. The Coder searches for 'FIX INSTRUCTIONS:' and '---FILE:' markers — formatting is critical
 
 FORMAT CHECK before responding:
   ☐ Starts with "ERROR CATEGORY:"
   ☐ Has "ROOT CAUSE:" 
-  ☐ Has "AFFECTED FILES:"
+  ☐ Has "AFFECTED FILES:" on ONE line, comma-separated (no line breaks within list)
   ☐ Has "ANALYSIS:" section
   ☐ Has "FIX INSTRUCTIONS:" 
   ☐ Each file fix starts with "---FILE: <path>---" (three dashes, exact format)
-  ☐ Ends with "CONFIDENCE: <1>" (not "CONFIDENCE:<1>" or other variations)
+  ☐ Ends with "CONFIDENCE: <digit>" (not "CONFIDENCE: <digit>/5" or other variations)
 ─────────────────────────────────────────────────────────────────────
 
 NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
@@ -153,13 +158,30 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
 
         # Extract affected files for logging
         affected = []
-        for line in response_text.split('\n'):
-            if 'AFFECTED FILES:' in line or 'FILE:' in line:
-                match = re.search(r"\b(src/\S+|tests/\S+|\S+\.java|\S+\.py|\S+\.ts)", line)
-                if match:
-                    affected.append(match.group(1))
         
-        affected_str = ", ".join(set(affected)) if affected else "unknown"
+        # Strategy 1: Extract from "AFFECTED FILES: ..." line
+        for line in response_text.split('\n'):
+            if 'AFFECTED FILES:' in line:
+                # Split on comma and extract all file paths
+                parts = line.split('AFFECTED FILES:')[1]
+                for item in parts.split(','):
+                    item = item.strip()
+                    if item and len(item) > 2:  # exclude empty or single-char items
+                        affected.append(item)
+        
+        # Strategy 2: Extract from "---FILE: <path> ---" format lines
+        for line in response_text.split('\n'):
+            if '---FILE:' in line and '---' in line:
+                # Extract path from: ---FILE: src/auth.py---
+                try:
+                    file_part = line.split('---FILE:')[1].split('---')[0].strip()
+                    if file_part and len(file_part) > 2:
+                        affected.append(file_part)
+                except (IndexError, ValueError):
+                    pass
+        
+        # Deduplicate and format
+        affected_str = ", ".join(sorted(set(affected))) if affected else "unknown"
 
         if confidence < _LOW_CONFIDENCE_THRESHOLD:
             state.record_failure(
