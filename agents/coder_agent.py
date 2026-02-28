@@ -143,6 +143,18 @@ class CoderAgent(BaseAgent):
         existing_block = (
             f"\nExisting content to modify:\n```\n{existing}\n```" if existing else ""
         )
+        
+        # Include previously generated files as context for consistency
+        previously_generated = {
+            fpath: content 
+            for fpath, content in state.generated_files.items()
+            if fpath != item.file  # Don't include the file we're generating
+        }
+        context_block = ""
+        if previously_generated:
+            files_context = self._format_files_truncated(previously_generated)
+            context_block = f"\nREFERENCE: Previously generated files in this session:\n{files_context}"
+        
         return f"""
 Implement the following backend file.
 
@@ -151,7 +163,7 @@ Action: {item.action}
 Description: {item.description}
 API Contract: {item.api_contract or 'N/A'}
 Scope estimate: {item.scope_estimate or 'N/A'}
-{existing_block}
+{existing_block}{context_block}
 
 Full task context: {state.task_prompt}
 
