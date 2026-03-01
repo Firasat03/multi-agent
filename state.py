@@ -72,6 +72,7 @@ class CoderOutput(BaseModel):
 class ReviewerOutput(BaseModel):
     review_notes: str = ""
     verdict: str = "PASS"           # "PASS" | "REJECT"
+    files_with_issues: set[str] = Field(default_factory=set)  # Which files have problems
 
 
 class TesterOutput(BaseModel):
@@ -85,6 +86,7 @@ class DebuggerOutput(BaseModel):
     fix_instructions: Optional[str] = None
     confidence: int = 3             # 1-5
     escalate: bool = False          # True → human review needed
+    files_with_issues: set[str] = Field(default_factory=set)  # Which files need fixes
 
 
 class IntegrationOutput(BaseModel):
@@ -100,6 +102,7 @@ class WriterOutput(BaseModel):
 class SecurityOutput(BaseModel):
     security_report: str = ""
     fix_instructions: Optional[str] = None   # Non-None only when HIGH findings block pipeline
+    files_with_issues: set[str] = Field(default_factory=set)  # Files with security findings
 
 
 class DevOpsOutput(BaseModel):
@@ -168,6 +171,7 @@ class PipelineState(BaseModel):
     review_notes: Optional[str] = None
     review_verdict: str = "PASS"
     review_retry_count: int = 0
+    files_with_issues: set[str] = Field(default_factory=set)  # Files identified by Reviewer as problematic
 
     # ── Tester ───────────────────────────────────────────────────────────────
     test_files: dict[str, str] = Field(default_factory=dict)
@@ -269,6 +273,7 @@ class PipelineState(BaseModel):
         elif isinstance(output, ReviewerOutput):
             self.review_notes = output.review_notes
             self.review_verdict = output.verdict
+            self.files_with_issues = output.files_with_issues
 
         elif isinstance(output, TesterOutput):
             self.test_files.update(output.test_files)
@@ -278,6 +283,7 @@ class PipelineState(BaseModel):
 
         elif isinstance(output, DebuggerOutput):
             self.fix_instructions = output.fix_instructions
+            self.files_with_issues = output.files_with_issues  # Track debugger-identified files
             self.static_analysis_output = None  # cleared after debug
 
         elif isinstance(output, IntegrationOutput):
@@ -291,6 +297,7 @@ class PipelineState(BaseModel):
 
         elif isinstance(output, SecurityOutput):
             self.security_report = output.security_report
+            self.files_with_issues = output.files_with_issues  # Track security-identified files
             if output.fix_instructions is not None:
                 self.fix_instructions = output.fix_instructions
 

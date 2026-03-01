@@ -302,8 +302,12 @@ def run(
                         f"[yellow]🔄 Reviewer REJECT #{review_attempts} — "
                         "sending back to Coder...[/yellow]"
                     )
+                    # Build fix instructions with explicit file list
+                    files_list = ", ".join(sorted(state.files_with_issues)) if state.files_with_issues else "All files"
                     state.fix_instructions = (
-                        "The code reviewer rejected the code. Fix ALL of these issues:\n"
+                        f"The code reviewer rejected the code.\n\n"
+                        f"FILES NEEDING FIXES: {files_list}\n\n"
+                        f"REVIEWER'S DETAILED FEEDBACK:\n"
                         + (state.review_notes or "")
                     )
 

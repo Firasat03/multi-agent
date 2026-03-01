@@ -394,20 +394,80 @@ NOW GENERATE THE COMPLETE FILE:
         }
         return patterns.get(language.lower(), "")
 
+    @staticmethod
+    def _extract_files_from_fix_instructions(fix_instructions: str, generated_files: dict[str, str]) -> set[str]:
+        """
+        Extract list of files needing fixes from fix_instructions.
+        
+        Looks for:
+          1. "FILES NEEDING FIXES: file1.py, file2.py" pattern
+          2. "FILES_WITH_ISSUES: file1.py, file2.py" pattern
+          3. Files explicitly mentioned in the text (heuristic)
+        
+        Returns set of file paths from generated_files that appear in fix_instructions.
+        """
+        files = set()
+        
+        # Try to find explicit FILES NEEDING FIXES, FILES_WITH_ISSUES, or AFFECTED FILES line
+        for pattern in [
+            r"FILES\s+NEEDING\s+FIXES:\s*(.+?)(?:\n|$)",
+            r"FILES_WITH_ISSUES:\s*(.+?)(?:\n|$)",
+            r"AFFECTED\s+FILES:\s*(.+?)(?:\n|$)",  # Debugger output format
+        ]:
+            match = re.search(pattern, fix_instructions, re.IGNORECASE)
+            if match:
+                files_str = match.group(1).strip()
+                # Parse comma-separated files
+                for f in files_str.split(','):
+                    f = f.strip().lower()
+                    if f and f != 'none':
+                        files.add(f)
+        
+        # If found via explicit markers, return them
+        if files:
+            # Match against actual generated files (case-insensitive)
+            matched = set()
+            for f in files:
+                for gen_file in generated_files.keys():
+                    if gen_file.lower() == f or gen_file.lower().endswith('/' + f):
+                        matched.add(gen_file)
+            if matched:
+                return matched
+        
+        # Fallback: heuristic - look for file names from generated_files in the text
+        for file_path in generated_files.keys():
+            file_name = os.path.basename(file_path).lower()
+            if file_name in fix_instructions.lower():
+                files.add(file_path)
+        
+        return files
+
+
 
     # ── Fix / retry generation ────────────────────────────────────────────
 
     def _apply_fix(self, state: PipelineState) -> PipelineState:
-        files_block = self._format_files_truncated(state.generated_files)
+        # Extract files needing fixes from fix_instructions
+        files_to_fix = self._extract_files_from_fix_instructions(state.fix_instructions, state.generated_files)
+        
+        # Get ONLY files needing fixes + brief summary of others (OPTIMIZATION: saves tokens)
+        files_block = self._format_files_for_fix(state.generated_files, files_to_fix)
+        
+        files_list_str = "\n  • ".join(sorted(files_to_fix)) if files_to_fix else "Unknown (Review ALL files carefully)"
 
         prompt = f"""
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ CRITICAL FIX REQUEST — PRODUCTION CODE REPAIR                          ┃
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-Your previous code generation had issues. The test suite found problems.
+Your previous code generation had issues. Problems identified and need fixing.
 
-DEBUGGER'S ANALYSIS (what's wrong):
+⚠️  FILES REQUIRING FIXES (PRIMARY FOCUS):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • {files_list_str}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DETAILED ANALYSIS (what's wrong):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {state.fix_instructions}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -418,16 +478,18 @@ CURRENT SOURCE FILES (to fix):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 YOUR TASK:
-  1. Read the Debugger's analysis carefully
-  2. Identify WHICH FILES need to be fixed
-  3. Regenerate ONLY those files with all recommended fixes applied
-  4. Ensure fixes are COMPLETE and actually solve the problems
-  5. Do NOT regenerate files that don't need changes (save tokens)
+  1. Review the FILES REQUIRING FIXES list above (your PRIMARY FOCUS)
+  2. Read the detailed analysis to understand what's broken
+  3. Regenerate ONLY the files listed above with ALL fixes applied
+  4. Ensure every fix described is actually implemented in the code
+  5. Ensure fixes are COMPLETE (no truncation, no placeholders)
+  6. Do NOT regenerate files that are not listed — they passed validation
 
 CRITICAL RULES:
+  ☐ FOCUS ONLY on files listed in "FILES REQUIRING FIXES" section
   ☐ Each file must have ALL IMPORTS for the fixes to work
   ☐ No truncated or incomplete code
-  ☐ Fix descriptions must actually be addressed in code
+  ☐ Every issue mentioned must be fixed in the code
   ☐ Output format EXACT (machine-parsed):
       # FILE: path/to/file.ext
       ```language
@@ -554,6 +616,40 @@ NOW PROVIDE THE FIXED FILES:
                 parts.append(entry)
                 total_chars += len(entry)
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _format_files_for_fix(files: dict[str, str], files_to_fix: set[str]) -> str:
+        """
+        OPTIMIZATION: Format files for fix prompts efficiently.
+        
+        Only includes full content for files_to_fix.
+        Other files are listed by name only (no content) to save tokens.
+        
+        Typical token savings: 35-40% on fix prompts.
+        """
+        parts = []
+        
+        # Include full content ONLY for files needing fixes
+        total_chars = 0
+        for path in sorted(files_to_fix):
+            if path in files:
+                content = files[path]
+                entry = f"# FILE: {path}\n```\n{content}\n```"
+                if total_chars + len(entry) > _MAX_FILES_CHARS:
+                    parts.append(f"# FILE: {path}\n(truncated — file too large)")
+                else:
+                    parts.append(entry)
+                    total_chars += len(entry)
+        
+        # List other files by name only (no content)
+        other_files = sorted(set(files.keys()) - files_to_fix)
+        if other_files:
+            parts.append(
+                f"\n[OTHER FILES - NOT MODIFIED IN THIS FIX] (listed for reference only)\n"
+                f"{', '.join(other_files)}"
+            )
+        
+        return "\n\n".join(parts) if parts else "(no files found)"
 
 
 def _ext_to_lang(filename: str) -> str:

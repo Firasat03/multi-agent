@@ -148,6 +148,12 @@ class SecurityAgent(BaseAgent):
         )
         state.log(self.name, tokens=tokens, notes=notes)
 
+        # ── Extract files with issues ─────────────────────────────────────
+        files_with_issues = set()
+        for finding in findings:
+            if finding.get("file"):
+                files_with_issues.add(finding["file"])
+
         # ── Block on HIGH findings ────────────────────────────────────────
         fix_instructions: str | None = None
         if high_findings and SECURITY_BLOCK_ON_HIGH:
@@ -156,9 +162,12 @@ class SecurityAgent(BaseAgent):
                 + (f"\n  Fix: {f['fix']}" if f.get("fix") else "")
                 for f in high_findings
             )
+            # Extract files needing fixes for explicit Coder focus
+            high_finding_files = ", ".join(sorted({f['file'] for f in high_findings if f.get("file")}))
             fix_instructions = (
-                "SECURITY SCAN FAILED — Fix ALL of the following HIGH severity "
-                f"vulnerabilities before proceeding:\n\n{fix_block}"
+                f"SECURITY SCAN FAILED — Fix ALL of the following HIGH severity vulnerabilities:\n\n"
+                f"FILES NEEDING FIXES: {high_finding_files}\n\n"
+                f"{fix_block}"
             )
             state.record_failure(
                 stage="SECURITY",
@@ -171,6 +180,7 @@ class SecurityAgent(BaseAgent):
         output = SecurityOutput(
             security_report=security_report,
             fix_instructions=fix_instructions,
+            files_with_issues=files_with_issues,
         )
         state.apply(output)
         return state

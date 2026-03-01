@@ -189,8 +189,9 @@ START YOUR REVIEW:
 """
         response_text, tokens = self._call_llm(state, prompt)
         verdict = _parse_verdict(response_text)
+        files_with_issues = _parse_files_with_issues(response_text)
 
-        output = ReviewerOutput(review_notes=response_text, verdict=verdict)
+        output = ReviewerOutput(review_notes=response_text, verdict=verdict, files_with_issues=files_with_issues)
         state.apply(output)
 
         # Parse and display review feedback
@@ -275,3 +276,41 @@ def _parse_verdict(text: str) -> str:
         + text[:200].replace('\n', ' ')
     )
     return "REJECT"
+
+
+def _parse_files_with_issues(text: str) -> set[str]:
+    """
+    Extract FILES_WITH_ISSUES line from reviewer response.
+    
+    Expected format:
+      FILES_WITH_ISSUES: src/auth.py, src/config.py
+      or
+      FILES_WITH_ISSUES: None
+    
+    Returns set of file paths, or empty set if parsing fails.
+    """
+    # Try to find FILES_WITH_ISSUES line
+    match = re.search(
+        r"FILES_WITH_ISSUES:\s*(.+?)(?:\n|$)",
+        text,
+        re.IGNORECASE | re.MULTILINE
+    )
+    
+    if not match:
+        return set()
+    
+    files_str = match.group(1).strip()
+    
+    # Check for "None" case
+    if files_str.lower() == "none":
+        return set()
+    
+    # Parse comma-separated file paths
+    files = set()
+    for file_path in files_str.split(','):
+        file_path = file_path.strip()
+        if file_path and file_path.lower() != 'none':
+            files.add(file_path)
+    
+    return files
+
