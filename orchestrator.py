@@ -288,6 +288,7 @@ def run(
 
                 if state.review_verdict == "PASS":
                     console.print("[green]✅ Code review passed![/green]")
+                    state.files_with_issues = set()  # Clear files_with_issues since code passed review
                     break
                 elif review_attempts >= MAX_REVIEW_RETRIES:
                     console.print(
@@ -343,11 +344,16 @@ def run(
                         f"[yellow]🔄 Security fix #{security_attempts + 1} — "
                         "sending to Coder...[/yellow]"
                     )
+                    # Include files_with_issues in fix instructions for Coder focus
+                    files_list = ", ".join(sorted(state.files_with_issues)) if state.files_with_issues else "All files"
+                    if state.fix_instructions and "FILES NEEDING FIXES:" not in state.fix_instructions:
+                        state.fix_instructions = f"FILES NEEDING FIXES: {files_list}\n\n" + state.fix_instructions
                     state = ctx.run_agent(coder, state, f"coder_security_fix_{security_attempts + 1}")
                     ctx.check_cost_budget(state)
                     security_attempts += 1
                 else:
                     console.print("[green]✅ Security scan passed![/green]")
+                    state.files_with_issues = set()  # Clear files_with_issues since security passed
                     break
 
         # ═══════════════════════════════════════════════════════════════════
@@ -404,6 +410,10 @@ def run(
                         state.status = Status.FAILED
                         return _finalize(state, ctx)
 
+                    # Include files_with_issues in fix instructions for Coder focus
+                    files_list = ", ".join(sorted(state.files_with_issues)) if state.files_with_issues else "All files"
+                    if state.fix_instructions and "FILES NEEDING FIXES:" not in state.fix_instructions:
+                        state.fix_instructions = f"FILES NEEDING FIXES: {files_list}\n\n" + state.fix_instructions
                     console.print("[yellow]Applying fix via Coder...[/yellow]")
                     state = ctx.run_agent(coder, state, f"coder_fix_unit_{attempts + 1}")
                     ctx.check_cost_budget(state)
@@ -411,6 +421,7 @@ def run(
                     continue
 
                 console.print("[green]✅ Unit / static tests passed.[/green]")
+                state.files_with_issues = set()  # Clear files_with_issues since tests passed
                 break
 
         # ═══════════════════════════════════════════════════════════════════
@@ -432,6 +443,7 @@ def run(
 
                     if state.integration_passed:
                         console.print("[green bold]✅ Integration tests passed.[/green bold]")
+                        state.files_with_issues = set()  # Clear files_with_issues since integration tests passed
                         break
 
                     if attempts >= MAX_DEBUG_RETRIES:
@@ -469,6 +481,10 @@ def run(
                         state.status = Status.FAILED
                         return _finalize(state, ctx)
 
+                    # Include files_with_issues in fix instructions for Coder focus
+                    files_list = ", ".join(sorted(state.files_with_issues)) if state.files_with_issues else "All files"
+                    if state.fix_instructions and "FILES NEEDING FIXES:" not in state.fix_instructions:
+                        state.fix_instructions = f"FILES NEEDING FIXES: {files_list}\n\n" + state.fix_instructions
                     console.print("[yellow]Applying integration fix via Coder...[/yellow]")
                     state = ctx.run_agent(coder, state, f"coder_fix_integration_{attempts + 1}")
                     ctx.check_cost_budget(state)
