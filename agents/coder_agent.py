@@ -107,37 +107,33 @@ class CoderAgent(BaseAgent):
         new_files: dict[str, str] = {}
         total_tokens = 0
 
-        for idx, item in enumerate(state.plan, 1):
-            if item.action == "DELETE":
-                state.generated_files.pop(item.file, None)
-                print(f"  [{idx}/{len(state.plan)}] ❌ DELETE {item.file}")
-                continue
+        import concurrent.futures
+        from threading import Lock
+        print_lock = Lock()
 
+        def generate_single_file(idx, item):
             existing = self._read_existing(item, state)
             
-            # Log progress
-            action_icon = "✏️" if item.action == "MODIFY" else "✨"
-            print(f"  [{idx}/{len(state.plan)}] {action_icon} {item.action:6s} {item.file}...", end="", flush=True)
+            with print_lock:
+                action_icon = "✏️" if item.action == "MODIFY" else "✨"
+                print(f"  [{idx}/{len(state.plan)}] {action_icon} {item.action:6s} {item.file}...", flush=True)
             
-            # Try generation with retries for quality
             generated_code = None
-            for attempt in range(2):  # 2 attempts max
+            local_tokens = 0
+            
+            for attempt in range(2):
                 prompt = self._build_prompt(item, existing, state)
                 response_text, tokens = self._call_llm(state, prompt)
-                total_tokens += tokens
+                local_tokens += tokens
 
-                # Try extracting FILE blocks first
                 parsed = self._extract_files_from_response(response_text, validate=True)
                 
-                if parsed:
-                    # Got valid FILE blocks
-                    generated_code = parsed.get(item.file)
-                    if generated_code:
-                        print(f" ✓ ({tokens} tokens)")
-                        new_files[item.file] = generated_code
-                        break
+                if parsed and item.file in parsed:
+                    generated_code = parsed[item.file]
+                    with print_lock:
+                        print(f" ✓ {item.file} ({tokens} tokens)")
+                    break
                 
-                # If FILE block extraction failed, try fallback
                 if not generated_code:
                     lang = _ext_to_lang(item.file)
                     fallback_code = self._extract_code_block(response_text, lang)
@@ -145,13 +141,13 @@ class CoderAgent(BaseAgent):
                     try:
                         self._validate_code_output(item.file, fallback_code)
                         generated_code = fallback_code
-                        print(f" ✓ ({tokens} tokens) [fallback]")
-                        new_files[item.file] = generated_code
+                        with print_lock:
+                            print(f" ✓ {item.file} ({tokens} tokens) [fallback]")
                         break
                     except ValueError as e:
-                        if attempt == 0:  # First attempt failed, retry with feedback
-                            print(f" ✗ validation failed, retrying...")
-                            # Build a retry prompt with specific feedback
+                        if attempt == 0:
+                            with print_lock:
+                                print(f" ✗ {item.file} validation failed, retrying...")
                             retry_prompt = f"""
 The previous attempt had issues:
 {str(e)}
@@ -171,22 +167,35 @@ RETRY OUTPUT:
 ```
 """
                             retry_response, retry_tokens = self._call_llm(state, retry_prompt)
-                            total_tokens += retry_tokens
+                            local_tokens += retry_tokens
                             response_text = retry_response
-                            # Loop will retry extraction
                         else:
-                            # Second attempt also failed
-                            print(f" ✗")
-                            raise RuntimeError(
-                                f"Coder failed to produce valid code for {item.file!r} after retries: {e}"
-                            ) from e
-            
-            # Ensure we got something
-            if item.file not in new_files:
-                print(f" ✗")
-                raise RuntimeError(
-                    f"Coder could not generate {item.file!r} despite multiple attempts"
-                )
+                            with print_lock:
+                                print(f" ✗ {item.file}")
+                            raise RuntimeError(f"Coder failed to produce valid code for {item.file!r} after retries: {e}") from e
+            if not generated_code:
+                with print_lock:
+                    print(f" ✗ {item.file}")
+                raise RuntimeError(f"Coder could not generate {item.file!r} despite multiple attempts")
+                
+            return item.file, generated_code, local_tokens
+
+        work_items = []
+        for idx, item in enumerate(state.plan, 1):
+            if item.action == "DELETE":
+                state.generated_files.pop(item.file, None)
+                print(f"  [{idx}/{len(state.plan)}] ❌ DELETE {item.file}")
+            else:
+                work_items.append((idx, item))
+
+        if work_items:
+            max_workers = min(10, len(work_items))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(generate_single_file, idx, item) for idx, item in work_items]
+                for future in concurrent.futures.as_completed(futures):
+                    file_path, code, tokens = future.result()
+                    new_files[file_path] = code
+                    total_tokens += tokens
 
         print(f"\n📝 Coder complete: {len(new_files)} files generated, {total_tokens} tokens")
         output = CoderOutput(

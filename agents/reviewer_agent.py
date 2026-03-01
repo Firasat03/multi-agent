@@ -63,13 +63,30 @@ class ReviewerAgent(BaseAgent):
             state.log(self.name, notes="skip — no files")
             return state
 
+        is_retry = state.review_retry_count > 0
+        
+        target_files = state.generated_files
+        if is_retry and hasattr(state, 'modified_source_files') and state.modified_source_files:
+            target_files = {
+                path: content for path, content in state.generated_files.items()
+                if path in state.modified_source_files
+            }
+            print(f"\n📋 Reviewer (Incremental Mode): Analyzing {len(target_files)} modified file(s)...")
+            print(f"   Files to review: {', '.join(target_files.keys())}")
+        else:
+            print(f"\n📋 Reviewer: Analyzing {len(target_files)} file(s)...")
+            print(f"   Files to review: {', '.join(target_files.keys())}")
+
+        if not target_files:
+            output = ReviewerOutput(review_notes="No modified files to review.", verdict="PASS")
+            state.apply(output)
+            state.log(self.name, notes="skip — no files modified in retry")
+            return state
+
         files_block = "\n\n".join(
             f"### {path}\n```\n{content}\n```"
-            for path, content in state.generated_files.items()
+            for path, content in target_files.items()
         )
-
-        print(f"\n📋 Reviewer: Analyzing {len(state.generated_files)} file(s)...")
-        print(f"   Files to review: {', '.join(state.generated_files.keys())}")
 
         rules_context = f"\nUSER CODING RULES (MANDATORY):\n{state.user_rules}\n" if state.user_rules else ""
 

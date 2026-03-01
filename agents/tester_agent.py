@@ -200,18 +200,12 @@ class TesterAgent(BaseAgent):
     ) -> TesterOutput:
         """
         Generate test files for the given source files.
-        
-        Args:
-            files_to_test: If None, generate tests for all source files.
-                          If set, only generate tests for specified files.
-                          (Optimization: on retries, only regenerate tests for modified files)
         """
         lang_config = LANGUAGE_CONFIG.get(language, LANGUAGE_CONFIG["unknown"])
         framework   = lang_config["test_framework"]
         test_folder = lang_config["test_folder"]
         test_ext    = lang_config["test_extension"]
 
-        # Filter source files: use specified set or all files
         source_files = state.generated_files.items()
         if files_to_test:
             source_files = [
@@ -223,17 +217,46 @@ class TesterAgent(BaseAgent):
             print(f"   ℹ️  Generating tests for {len(state.generated_files)} file(s)")
 
         if not source_files:
-            # No files to test
             output.test_files = {}
             return output
 
-        files_block = "\n\n".join(
-            f"# FILE: {path}\n```\n{content}\n```"
-            for path, content in source_files
-        )
+        import concurrent.futures
+        from threading import Lock
+        print_lock = Lock()
+        
+        total_tokens = 0
+        new_test_files = {}
 
-        prompt = f"""
-Write a comprehensive, production-grade test suite for the following backend code.
+        def resolve_test_filename(source_path: str) -> str:
+            import os
+            base = os.path.basename(source_path)
+            name, _ = os.path.splitext(base)
+            if language == "python":
+                return f"{test_folder}test_{name}{test_ext}"
+            elif language in ["java", "kotlin"]:
+                return f"{test_folder}{name}Test{test_ext}"
+            elif language == "go":
+                name = name.rstrip("_test") # just in case
+                return f"{name}_test.go"
+            elif language == "ruby":
+                return f"{test_folder}{name}{test_ext}"
+            elif language == "php":
+                return f"{test_folder}{name.capitalize()}Test.php"
+            elif language == "csharp":
+                return f"{test_folder}{name}Tests{test_ext}"
+            else:
+                return f"{test_folder}{name}{test_ext}"
+
+        def generate_test_for_file(path, content):
+            expected_test_file = resolve_test_filename(path)
+            
+            with print_lock:
+                print(f"     🧪 Generating tests for {path}...", flush=True)
+
+            files_block = f"# FILE: {path}\n```\n{content}\n```"
+            
+            prompt = f"""
+Write a comprehensive, production-grade test suite for the following specific backend file.
 
 LANGUAGE: {language}
 TEST FRAMEWORK: {framework}
@@ -242,12 +265,11 @@ TEST FILE EXTENSION: {test_ext}
 
 TASK CONTEXT: {state.task_prompt}
 
-SOURCE FILES:
+TARGET FILE TO TEST:
 {files_block}
 
 INSTRUCTIONS:
-- Generate a comprehensive but token-efficient test suite.
-- If the project is large, focus on the most important logic files.
+- Generate a comprehensive but token-efficient test suite specifically for this file.
 - Ensure all external mocks are correctly implemented.
 - If you need new test dependencies that aren't in the project, mention them in a comment.
 
@@ -256,7 +278,7 @@ MANDATORY OUTPUT FORMAT (machine-parsed, no exceptions)
 
 EXAMPLE (if writing Python tests with pytest):
 
-# FILE: {test_folder}test_auth{test_ext}
+# FILE: {expected_test_file}
 ```{language}
 import pytest
 from unittest.mock import Mock, patch
@@ -274,7 +296,7 @@ class TestLogin:
 ```
 
 CRITICAL RULES:
-1. Each file: '# FILE: {test_folder}<name>{test_ext}' at column 0 (no indentation)
+1. Each file: '# FILE: {expected_test_file}' at column 0 (no indentation)
 2. Next line: ```{language}
 3. Write COMPLETE test code (no truncation, no comments like "rest of tests")
 4. Close with ``` on its own line
@@ -283,88 +305,46 @@ CRITICAL RULES:
 7. Mock ALL external dependencies
 
 FALLBACK (if you cannot generate valid tests):
-# FILE: {test_folder}test_placeholder{test_ext}
+# FILE: {expected_test_file}
 ```{language}
 //placeholder test file
 ```
 
-FORMAT CHECK before responding:
-  ☐ Each file starts with '# FILE: <path>' at column 0
-  ☐ Immediately followed by ```{language}
-  ☐ Test code is COMPLETE (no truncation)
-  ☐ Ends with ``` on its own line
-  ☐ No prose or explanations outside ``` blocks
-  ☐ Every test has a clear name and description
-  ☐ All external dependencies are mocked
 ─────────────────────────────────────────────────────────────────────
 
 NOW OUTPUT ONLY FILE BLOCKS:
 """
-        response_text, tokens = self._call_llm(state, prompt)
-
-        parsed = self._extract_files_from_response(response_text, validate=False)
-        if parsed:
-            output.test_files.update(parsed)
-        else:
-            # If parsing failed, attempt a structured retry
-            print(
-                "[Tester] Warning: No test FILE blocks found. "
-                "Retrying with stricter format requirements..."
-            )
+            response_text, local_tokens = self._call_llm(state, prompt)
             
-            retry_prompt = f"""
-Output test files in EXACT format. ONLY FILE blocks, NO prose.
-
-Language: {language}
-Framework: {framework}
-Test folder: {test_folder}
-File extension: {test_ext}
-
-EXAMPLE (minimal valid test file):
-
-# FILE: {test_folder}test_basic{test_ext}
-```{language}
-import pytest
-def test_placeholder():
-    assert True
-```
-
-FORMAT REQUIREMENTS:
-  ☐ '# FILE: <path>' at column 0 (no indentation)
-  ☐ Immediately followed by ```{language}
-  ☐ COMPLETE test code (no truncation)
-  ☐ ``` on its own line to close
-  ☐ Nothing else — no prose, no explanations
-
-If generation fails, output:
-# FILE: {test_folder}test_placeholder{test_ext}
-```{language}
-//placeholder test file
-```
-
-GENERATE TESTS FOR these source files:
-{files_block}
-
-RESPOND WITH ONLY FILE BLOCKS:
-"""
-            retry_text, retry_tokens = self._call_llm(state, retry_prompt)
-            tokens += retry_tokens
-            parsed = self._extract_files_from_response(retry_text, validate=False)
+            parsed = self._extract_files_from_response(response_text, validate=False)
+            if not parsed:
+                with print_lock:
+                    print(f"[Tester] Warning: No test FILE blocks found for {path}. Retrying...")
+                retry_prompt = f"Output test files in EXACT format. ONLY FILE blocks, NO prose.\n\nEXPECTED OUTPUT:\n# FILE: {expected_test_file}\n```{language}\n<your test code here>\n```\n\nTARGET FILE:\n{files_block}"
+                retry_text, retry_tokens = self._call_llm(state, retry_prompt)
+                local_tokens += retry_tokens
+                parsed = self._extract_files_from_response(retry_text, validate=False)
+                
+            if not parsed:
+                with print_lock:
+                    print(f"[Tester] ERROR: Could not generate valid test files for {path}. Creating placeholder.")
+                parsed = {expected_test_file: "//placeholder test file\n"}
+                
+            return parsed, local_tokens
             
-            if parsed:
-                output.test_files.update(parsed)
-            else:
-                # Last resort: create a minimal test file to avoid breaking the pipeline
-                print(
-                    "[Tester] ERROR: Could not generate valid test files. "
-                    "Creating a placeholder test file."
-                )
-                placeholder_name = f"{test_folder}test_generated{test_ext}"
-                output.test_files[placeholder_name] = "//placeholder test file\n"
-
+        if source_files:
+            max_workers = min(10, len(source_files))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(generate_test_for_file, path, content) for path, content in source_files]
+                for future in concurrent.futures.as_completed(futures):
+                    parsed_result, tokens = future.result()
+                    new_test_files.update(parsed_result)
+                    total_tokens += tokens
+                
+        output.test_files.update(new_test_files)
         state.log(
             self.name,
-            tokens=tokens,
+            tokens=total_tokens,
             notes=f"{len(output.test_files)} test file(s) generated",
         )
         return output
