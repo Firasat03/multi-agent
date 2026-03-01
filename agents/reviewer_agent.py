@@ -2,9 +2,9 @@
 agents/reviewer_agent.py — Reviewer Agent
 
 Changes vs original:
-  - Verdict parsing now defaults to REJECT (fail-safe) instead of PASS
-    — a malformed LLM response that omits the verdict line no longer
-    silently passes code review
+  - Refocused on practical code functionality (imports, function calls, cross-file consistency)
+  - Removed production-level concerns (PII, observability patterns, security details)
+  - Verdict parsing defaults to REJECT (fail-safe)
   - Returns typed ReviewerOutput; Orchestrator calls state.apply(output)
   - Verdict is stored separately from review_notes on state for cleaner access
 """
@@ -21,35 +21,34 @@ from state import PipelineState, ReviewerOutput
 class ReviewerAgent(BaseAgent):
     name = "Reviewer"
     system_role = (
-        "You are a Senior Code Reviewer and Security Specialist with 15+ years of backend experience. "
-        "You enforce production-grade standards. Your review MUST cover:\n\n"
-        "1. Correctness — does the code implement the plan accurately?\n"
-        "2. API contract alignment — do all endpoints/signatures exactly match the plan?\n"
-        "3. Security:\n"
-        "   - SQL injection / NoSQL injection risks\n"
-        "   - Unvalidated / unsanitised inputs\n"
-        "   - Secret / credential leaks in code or logs\n"
-        "   - Missing authentication / authorisation guards\n"
-        "   - Insecure defaults (debug mode, wide CORS, open endpoints)\n"
-        "4. Error handling:\n"
-        "   - All exceptions caught and handled gracefully\n"
-        "   - No bare 'except' clauses\n"
-        "   - HTTP responses always include a meaningful error message\n"
-        "5. Observability — structured logging on all significant operations; no PII logged\n"
-        "6. Data integrity — correct transaction boundaries; no N+1 query risks\n"
-        "7. Code quality — DRY, consistent naming, complex logic documented\n"
-        "8. User coding rules (RULES.md) — any violation is an automatic REJECT\n\n"
-        "Be strict but constructive. Quote the specific line or function causing the issue.\n\n"
+        "You are a Code Reviewer focused on ensuring code will actually run. "
+        "Your review MUST verify:\n\n"
+        "1. IMPORTS — All imported modules/functions actually exist in standard libraries or are defined in project files\n"
+        "2. FUNCTION CALLS — Every function/method called is actually defined somewhere (in the file or imported)\n"
+        "3. CROSS-FILE CONSISTENCY — Functions called in one file are properly defined in other files\n"
+        "4. PARAMETER MATCHING — Function calls match the defined signatures (right number/types of parameters)\n"
+        "5. CLASS/OBJECT USAGE — Classes are properly instantiated before use; methods exist on objects\n"
+        "6. VARIABLE SCOPE — Variables are defined before use; no undefined variable references\n"
+        "7. SYNTAX CORRECTNESS — Code has valid syntax for the language (no obvious typos or malformed code)\n"
+        "8. USER CODING RULES (RULES.md) — any violation is an automatic REJECT\n\n"
+        "Focus ONLY on whether the code will actually execute. Ignore:\n"
+        "  - Security vulnerabilities (that's a separate security scan)\n"
+        "  - Performance optimization\n"
+        "  - Code style or naming conventions (unless breaking imports)\n"
+        "  - PII in logs or observability patterns\n"
+        "  - Transaction boundaries\n"
+        "  - Production-grade quality standards\n\n"
+        "Be strict and specific. Quote the exact line, function name, or import that has the problem.\n\n"
         "CRITICAL — MANDATORY OUTPUT FORMAT:\n"
-        "You MUST end your review with EXACTLY this format (one section per line):\n\n"
+        "You MUST end your review with EXACTLY this format:\n\n"
         "FILES_WITH_ISSUES: <Comma-separated list of relative paths needing fixes, or 'None'>\n"
         "VERDICT: PASS\n\n"
         "OR if there are issues:\n\n"
         "FILES_WITH_ISSUES: src/auth/login.py, src/config.py\n"
         "VERDICT: REJECT\n"
-        "REASON: <Clear, specific explanation of the critical issue that must be fixed>\n\n"
+        "REASON: <One sentence: what function/import/variable is broken>\n\n"
         "The machine parser looks for exactly 'VERDICT: PASS' or 'VERDICT: REJECT'.\n"
-        "The 'FILES_WITH_ISSUES' line is used to tell the Coder which files to regenerate.\n"
+        "The 'FILES_WITH_ISSUES' line tells the Coder which files to regenerate.\n"
         "If you cannot decide, default to REJECT.\n"
         "DO NOT output any other text after the VERDICT line."
     )
@@ -91,7 +90,7 @@ class ReviewerAgent(BaseAgent):
         rules_context = f"\nUSER CODING RULES (MANDATORY):\n{state.user_rules}\n" if state.user_rules else ""
 
         prompt = f"""
-Review the following generated backend code strictly.
+Review the following generated backend code. Focus ONLY on whether it will actually run.
 
 ORIGINAL TASK: {state.task_prompt}
 {rules_context}
@@ -101,52 +100,60 @@ ARCHITECT'S PLAN SUMMARY:
 GENERATED FILES:
 {files_block}
 
-Perform a thorough review covering all 8 dimensions in your role description.
+Your review MUST check:
+  1. IMPORTS: Do all imported modules/functions actually exist or are they defined in the code?
+  2. FUNCTION CALLS: Is every function/method actually defined before it's called?
+  3. CROSS-FILE REFERENCES: If file A calls a function from file B, is it properly exported/available?
+  4. PARAMETER MATCHING: Do function calls have the right number and types of arguments?
+  5. VARIABLE SCOPE: Are all variables defined before use? No undefined references?
+  6. SYNTAX: Is the code syntactically correct for the language?
+  7. CLASS INSTANTIATION: Are objects created before methods are called on them?
+
+IGNORE: security, performance, style, logging patterns, PII handling, transaction boundaries, production standards.
 
 ─────────────────────────────────────────────────────────────────────
 MANDATORY OUTPUT FORMAT (machine-parsed, no exceptions)
 
-STEP 1: Write your detailed review (covering all 8 dimensions)
+STEP 1: Write your detailed review (checking the 7 dimensions above)
+Write the specific issues found (missing imports, undefined functions, etc.)
 
-STEP 2: At the END, output EXACTLY ONE of these patterns on its own line:
+STEP 2: At the END, output EXACTLY ONE of these patterns:
 
-PATTERN A (if code is good, no issues):
+PATTERN A (if code is runnable, no issues):
 ═════════════════════════════════════
 FILES_WITH_ISSUES: None
 VERDICT: PASS
 ═════════════════════════════════════
 
-PATTERN B (if code has issues that need fixing):
+PATTERN B (if code will not run):
 ═════════════════════════════════════
-FILES_WITH_ISSUES: src/auth/login.py, src/config.py
+FILES_WITH_ISSUES: src/auth/login.py, src/models/user.py
 VERDICT: REJECT
-REASON: <one sentence: what is the critical issue>
+REASON: login.py calls hash_password() but it's not imported from utils; also User class not defined in models/user.py.
 ═════════════════════════════════════
 
-CRITICAL RULES FOR THIS SECTION:
-  1. ONLY output one of the two patterns above
-  2. Do NOT output both patterns
-  3. VERDICT: must be exactly "VERDICT: PASS" or "VERDICT: REJECT" (no typos)
-  4. FILES_WITH_ISSUES line must come BEFORE VERDICT line
-  5. For REJECT cases, add a REASON: line that is ONE sentence max
-  6. Do NOT output any text AFTER the REASON: line
-  7. If unsure, always choose VERDICT: REJECT (fail-safe)
-  8. The dashes (═══) on the lines before/after help parsing
+CRITICAL RULES:
+  1. Output ONLY one pattern above
+  2. VERDICT must be exactly "VERDICT: PASS" or "VERDICT: REJECT"
+  3. FILES_WITH_ISSUES line must come BEFORE VERDICT line
+  4. For REJECT: REASON must be ONE sentence max, specific about what's broken
+  5. Do NOT output any text AFTER the dashed lines
+  6. If unsure, choose VERDICT: REJECT (fail-safe)
+  7. The dashes (═══) help parsing
 
-EXAMPLE 1 (PASS case):
-═════════════════════════════════════
-FILES_WITH_ISSUES: None
-VERDICT: PASS
-═════════════════════════════════════
+EXAMPLES (to clarify what to look for):
 
-EXAMPLE 2 (REJECT case):
-═════════════════════════════════════
-FILES_WITH_ISSUES: src/auth/service/AuthService.java, src/auth/security/SecurityConfig.java
-VERDICT: REJECT
-REASON: Missing authentication on /login endpoint allows unauthorized token generation.
-═════════════════════════════════════
+BAD - REJECT: 
+  - Function calls processor.process(data) but processor is not imported
+  - Class User defined in models.py but not imported in auth.py where it's used
+  - Function signature: def create_user(name) but called with create_user(name, email, age)
+  - Variable user referenced before it's assigned
 
-DO NOT include any other text after the dashed lines.
+GOOD - PASS:
+  - All imports exist (standard library or defined in project)
+  - All functions are defined before calling
+  - Cross-file calls use proper imports
+  - Function signatures match their calls
 
 START YOUR REVIEW:
 """
