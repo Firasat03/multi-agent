@@ -162,7 +162,7 @@ class BaseAgent(ABC):
         if any(pattern in stripped.lower() for pattern in truncation_patterns):
             raise ValueError(
                 f"Output for {file_path!r} appears truncated or incomplete. "
-                f"Look for: {..., etc., rest of, and so on, omitted, continued}"
+                f"Look for: {{..., etc., rest of, and so on, omitted, continued}}"
             )
         
         # Check it looks like actual code (has at least one structural element)
