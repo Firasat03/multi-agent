@@ -13,7 +13,7 @@ Changes vs original:
 from __future__ import annotations
 
 import os
-
+import re
 from agents.base_agent import BaseAgent
 from config import CHARS_PER_TOKEN, DEFAULT_CONTEXT_WINDOW, MODEL_CONTEXT_WINDOWS, Status
 from state import CoderOutput, PipelineState
@@ -398,16 +398,12 @@ NOW GENERATE THE COMPLETE FILE:
     def _extract_files_from_fix_instructions(fix_instructions: str, generated_files: dict[str, str]) -> set[str]:
         """
         Extract list of files needing fixes from fix_instructions.
-        
-        Looks for:
-          1. "FILES NEEDING FIXES: file1.py, file2.py" pattern
-          2. "FILES_WITH_ISSUES: file1.py, file2.py" pattern
-          3. Files explicitly mentioned in the text (heuristic)
-        
-        Returns set of file paths from generated_files that appear in fix_instructions.
         """
         files = set()
         
+        if not fix_instructions:
+            return files
+            
         # Try to find explicit FILES NEEDING FIXES, FILES_WITH_ISSUES, or AFFECTED FILES line
         for pattern in [
             r"FILES\s+NEEDING\s+FIXES:\s*(.+?)(?:\n|$)",
