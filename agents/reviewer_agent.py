@@ -172,7 +172,7 @@ BAD - REJECT (Dependency/Config Issues):
   - package.json missing 'express' dependency but code has const express = require('express')
   - pom.xml has version conflict: one module needs spring-boot 2.5 but another requires 3.0
   - application.properties references 'database.url' but code looks for 'db.host' and 'db.port'
-  - config.py references environment variable '${DB_PASSWORD}' but it's malformed (should be ${DB_PASSWORD})
+  - config.py references environment variable '${{DB_PASSWORD}}' but it's malformed (should be ${{DB_PASSWORD}})
   - requirements.txt lists 'psycopg2' with invalid version string like 'psycopg2==abc' (not a real version)
 
 GOOD - PASS:
