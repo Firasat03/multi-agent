@@ -347,12 +347,12 @@ def run(
                     break
 
         # ═══════════════════════════════════════════════════════════════════
-        # STAGE 4 — Tester (unit + static) → Debugger loop
+        # STAGE 4 — Tester (unit tests) → Debugger loop
         # ═══════════════════════════════════════════════════════════════════
         if SKIP_TESTER:
             console.print("[yellow]⏭️  Skipping Stage 4 — Tester (disabled)[/yellow]")
         elif state.status in (Status.REVIEWING, Status.CODING, Status.SECURITY,
-                            Status.TESTING, Status.DEBUGGING, Status.INTEGRATION):
+                            Status.TESTING, Status.DEBUGGING):
             attempts = state.retry_count
 
             while True:
@@ -407,60 +407,69 @@ def run(
                     continue
 
                 console.print("[green]✅ Unit / static tests passed.[/green]")
+                break
 
-                # ── 4b: Integration tests ─────────────────────────────────
-                if SKIP_INTEGRATION:
-                    console.print("[yellow]⏭️  Skipping Integration Tests (disabled)[/yellow]")
-                    break
-                    
-                console.rule("[bold cyan]🔗 Integration Tests[/bold cyan]")
-                state = ctx.run_agent(integrator, state, f"integration_{attempts + 1}")
-                ctx.check_cost_budget(state)
-
-                if state.integration_passed:
-                    console.print("[green bold]✅ Integration tests passed.[/green bold]")
-                    break
-
-                if attempts >= MAX_DEBUG_RETRIES:
-                    console.print(
-                        f"[red]Max retries reached after integration failures. "
-                        "Escalating to human.[/red]"
-                    )
-                    state.status = Status.FAILED
-                    state.record_failure(
-                        stage="INTEGRATION",
-                        agent="Orchestrator",
-                        error_summary=f"Integration tests failed after {attempts} retries",
-                        error_detail=state.integration_test_output or "",
-                    )
-                    return _finalize(state, ctx)
-
-                console.print("[red]Integration tests failed — invoking Debugger...[/red]")
-                
-                if SKIP_DEBUGGER:
-                    console.print("[yellow]⏭️  Debugger disabled — escalating to human instead[/yellow]")
-                    state.status = Status.FAILED
-                    state.record_failure(
-                        stage="INTEGRATION",
-                        agent="Orchestrator",
-                        error_summary="Integration tests failed and Debugger is disabled",
-                        error_detail=state.integration_test_output or "",
-                    )
-                    return _finalize(state, ctx)
-                
-                console.rule(f"[bold red]🐛 Debugger — integration cycle {attempts + 1}[/bold red]")
-                state = ctx.run_agent(debugger, state, f"debugger_integration_{attempts + 1}")
-                ctx.check_cost_budget(state)
-
-                if _debugger_escalated(state):
-                    state.status = Status.FAILED
-                    return _finalize(state, ctx)
-
-                console.print("[yellow]Applying integration fix via Coder...[/yellow]")
-                state = ctx.run_agent(coder, state, f"coder_fix_integration_{attempts + 1}")
-                ctx.check_cost_budget(state)
+        # ═══════════════════════════════════════════════════════════════════
+        # STAGE 4b — Integration Tests → Debugger loop (independent of Tester)
+        # ═══════════════════════════════════════════════════════════════════
+        if SKIP_INTEGRATION:
+            console.print("[yellow]⏭️  Skipping Stage 4b — Integration Tests (disabled)[/yellow]")
+        elif state.status not in (Status.FAILED, Status.ABORTED):
+            # Integration stage can run after unit tests pass, or independently if tester is skipped
+            if state.status in (Status.TESTING, Status.DEBUGGING, Status.INTEGRATION, 
+                              Status.REVIEWING, Status.CODING, Status.SECURITY):
                 attempts = state.retry_count
-                state.integration_passed = None  # reset so integration re-runs
+
+                while True:
+                    # ── 4b: Integration tests ─────────────────────────────────
+                    console.rule("[bold cyan]🔗 Integration Tests[/bold cyan]")
+                    state = ctx.run_agent(integrator, state, f"integration_{attempts + 1}")
+                    ctx.check_cost_budget(state)
+
+                    if state.integration_passed:
+                        console.print("[green bold]✅ Integration tests passed.[/green bold]")
+                        break
+
+                    if attempts >= MAX_DEBUG_RETRIES:
+                        console.print(
+                            f"[red]Max retries reached after integration failures. "
+                            "Escalating to human.[/red]"
+                        )
+                        state.status = Status.FAILED
+                        state.record_failure(
+                            stage="INTEGRATION",
+                            agent="Orchestrator",
+                            error_summary=f"Integration tests failed after {attempts} retries",
+                            error_detail=state.integration_test_output or "",
+                        )
+                        return _finalize(state, ctx)
+
+                    console.print("[red]Integration tests failed — invoking Debugger...[/red]")
+                    
+                    if SKIP_DEBUGGER:
+                        console.print("[yellow]⏭️  Debugger disabled — escalating to human instead[/yellow]")
+                        state.status = Status.FAILED
+                        state.record_failure(
+                            stage="INTEGRATION",
+                            agent="Orchestrator",
+                            error_summary="Integration tests failed and Debugger is disabled",
+                            error_detail=state.integration_test_output or "",
+                        )
+                        return _finalize(state, ctx)
+                    
+                    console.rule(f"[bold red]🐛 Debugger — integration cycle {attempts + 1}[/bold red]")
+                    state = ctx.run_agent(debugger, state, f"debugger_integration_{attempts + 1}")
+                    ctx.check_cost_budget(state)
+
+                    if _debugger_escalated(state):
+                        state.status = Status.FAILED
+                        return _finalize(state, ctx)
+
+                    console.print("[yellow]Applying integration fix via Coder...[/yellow]")
+                    state = ctx.run_agent(coder, state, f"coder_fix_integration_{attempts + 1}")
+                    ctx.check_cost_budget(state)
+                    attempts = state.retry_count
+                    state.integration_passed = None  # reset so integration re-runs
 
         # ═══════════════════════════════════════════════════════════════════
         # STAGE 5 — Writer

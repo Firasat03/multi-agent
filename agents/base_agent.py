@@ -124,25 +124,64 @@ class BaseAgent(ABC):
     @staticmethod
     def _validate_code_output(file_path: str, content: str) -> None:
         """
-        Raise ValueError if the content looks like LLM prose rather than code.
-        Catches the most common failure: LLM returns an explanation instead of
-        a code block, which then gets stored as a 'source file'.
+        Raise ValueError if the content looks like LLM prose rather than code
+        or has obvious structural problems.
+        
+        Checks:
+          1. Minimum code length
+          2. Not explanation/prose text
+          3. Not an incomplete response
+          4. Has code structure (function/class/statement)
         """
         stripped = content.strip()
+        
+        # Check minimum length
         if len(stripped) < 10:
             raise ValueError(
-                f"Suspiciously short content for {file_path!r} "
-                f"({len(stripped)} chars): {stripped!r}"
+                f"Content too short for {file_path!r} ({len(stripped)} chars): {stripped!r}"
             )
+        
+        # Check for prose/explanation patterns
         prose_starters = (
             "I ", "I'", "Here ", "Sure", "Of course", "Certainly",
-            "As requested", "Below is", "The following",
+            "As requested", "Below is", "The following", "This file",
+            "In this", "We ", "To implement", "The code",
         )
         if any(stripped.startswith(p) for p in prose_starters):
             raise ValueError(
-                f"Coder output for {file_path!r} looks like explanation text "
-                f"rather than code. First 100 chars: {stripped[:100]!r}"
+                f"Output for {file_path!r} looks like explanation text rather than code. "
+                f"First 80 chars: {stripped[:80]!r}"
             )
+        
+        # Check for incomplete/truncated code patterns
+        truncation_patterns = (
+            "...", "et cetera", "and so on", "rest of", "similar code",
+            "continue like this", "you get the idea", "etc.", "omitted",
+            "truncated", "...more code", "[continued]",
+        )
+        if any(pattern in stripped.lower() for pattern in truncation_patterns):
+            raise ValueError(
+                f"Output for {file_path!r} appears truncated or incomplete. "
+                f"Look for: {..., etc., rest of, and so on, omitted, continued}"
+            )
+        
+        # Check it looks like actual code (has at least one structural element)
+        code_indicators = (
+            "{", "}", "def ", "class ", "function ", "import ", "const ", 
+            "let ", "var ", "public ", "private ", "protected ", "async ",
+            "package ", "#include", "fn ", "impl ", "struct ", "pub ",
+        )
+        if not any(ind in stripped for ind in code_indicators):
+            # Could be a data file, but check the first line more carefully
+            lines = stripped.split('\n')
+            first_line = lines[0].strip() if lines else ""
+            # If it starts with prose, it's definitely wrong
+            prose_openers = ("I ", "This ", "Here", "The ", "As requested")
+            if any(first_line.startswith(p) for p in prose_openers):
+                raise ValueError(
+                    f"Output for {file_path!r} doesn't look like code. "
+                    f"First line: {first_line!r}"
+                )
 
     # ── Multi-file response parser ────────────────────────────────────────────
 

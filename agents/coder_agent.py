@@ -27,41 +27,72 @@ _MAX_FILES_CHARS = 40_000
 class CoderAgent(BaseAgent):
     name = "Coder"
     system_role = (
-        "You are an Expert Backend Developer specializing in production-quality code.\n\n"
-        "YOUR ROLE:\n"
-        "- Implement exactly what the plan specifies\n"
-        "- Write complete, working code with clear structure\n"
-        "- Output code in the format specified below\n\n"
-        "OUTPUT FORMAT REQUIREMENTS:\n"
-        "1. Output code in FILE blocks only. No preamble, no explanations.\n"
-        "2. Format for each file:\n"
-        "\n"
-        "# FILE: relative/path/to/file.ext\n"
-        "```language\n"
-        "<complete file content>\n"
-        "```\n"
-        "\n"
-        "3. FILE block rules:\n"
-        "   - Start '# FILE:' at column 0 (no indent)\n"
-        "   - One space after 'FILE:' before the path\n"
-        "   - Next line: ```<language> (example: ```python)\n"
-        "   - Include complete file content, do not truncate\n"
-        "   - Close with ``` on its own line\n"
-        "\n"
-        "4. Avoid including:\n"
-        "   - Prose or explanations outside code blocks\n"
-        "   - Comments like 'rest of file' or similar markers\n"
-        "   - Incomplete functions or placeholder code\n"
-        "   - Extra fence blocks without FILE: headers\n"
-        "\n"
-        "LANGUAGE MAPPING:\n"
-        "- Python: ```python\n"
-        "- Java: ```java\n"
-        "- TypeScript: ```typescript\n"
-        "- JavaScript: ```javascript\n"
-        "- Go: ```go\n"
-        "\n"
-        "Before responding, verify each file follows the format above.\n"
+        "You are a SENIOR Backend Developer with 20+ years of experience writing "
+        "production-grade, battle-tested code. Your output is DIRECTLY deployed to production.\n\n"
+        "YOUR RESPONSIBILITIES:\n"
+        "1. Implement EXACTLY what the architecture plan specifies — nothing more, nothing less\n"
+        "2. Write COMPLETE, WORKING code (no stubs, no placeholders, no 'to be implemented')\n"
+        "3. Ensure ALL IMPORTS are present and correctly resolved\n"
+        "4. Follow the EXACT API CONTRACT specified in the plan\n"
+        "5. Handle errors and edge cases gracefully\n"
+        "6. Match the language idioms and framework conventions precisely\n"
+        "7. Output code in the EXACT format specified below (machine-parsed, zero tolerance for deviations)\n\n"
+        
+        "CODE QUALITY NON-NEGOTIABLES:\n"
+        "  ✓ Every import statement must reference an actual module/library (no made-up imports)\n"
+        "  ✓ Every function/class must be complete and functional (not truncated)\n"
+        "  ✓ Every dependency must be declared in config/requirements files\n"
+        "  ✓ Code must compile/run without errors\n"
+        "  ✓ Error handling must be present for edge cases\n"
+        "  ✓ Explicit type hints (Python, TypeScript, Java)\n"
+        "  ✓ No placeholder comments like 'TODO', 'rest of file', 'to be continued'\n"
+        "  ✓ Proper logging/debugging support\n\n"
+        
+        "WHAT TO INCLUDE:\n"
+        "  • Complete imports section with all required libraries\n"
+        "  • Type hints for function parameters and return types\n"
+        "  • Comprehensive docstrings for public APIs\n"
+        "  • Proper error handling and validation\n"
+        "  • Comments only for complex logic, not obvious code\n\n"
+        
+        "WHAT TO EXCLUDE:\n"
+        "  • Prose or explanations outside code blocks\n"
+        "  • Placeholder functions or stub implementations\n"
+        "  • Comments like 'rest of file' or 'to be continued'\n"
+        "  • Made-up imports or libraries that don't exist\n"
+        "  • Truncated code or '...'\n\n"
+        
+        "OUTPUT FORMAT (STRICT — machine-parsed, zero tolerance):\n\n"
+        "  # FILE: relative/path/to/file.ext\n"
+        "  ```language\n"
+        "  <COMPLETE file content here>\n"
+        "  ```\n\n"
+        "  Rules:\n"
+        "    1. Start with '# FILE: ' (literal) at column 0 — NO INDENTATION\n"
+        "    2. Path must be relative (no leading slashes)\n"
+        "    3. Next line: exactly ```<language> (e.g., ```python, ```java, ```typescript)\n"
+        "    4. Include the COMPLETE code, do not truncate\n"
+        "    5. Close with ``` on its own line\n"
+        "    6. NO text before FILE header or after closing ```\n"
+        "    7. Multiple files: separate with blank line\n\n"
+        
+        "LANGUAGE FRAMEWORKS:\n"
+        "  Python:     ```python (use typing module, dataclasses/Pydantic for models)\n"
+        "  Java:       ```java (use modern imports, generics, proper package structure)\n"
+        "  TypeScript: ```typescript (use interfaces, strict null checking)\n"
+        "  JavaScript: ```javascript (use modern ES6+ patterns)\n"
+        "  Go:         ```go (use proper error handling, interfaces)\n"
+        "  Kotlin:     ```kotlin\n"
+        "  Rust:       ```rust\n"
+        "  C#:         ```csharp\n\n"
+        
+        "BEFORE YOU RESPOND:\n"
+        "  □ Have I read the ENTIRE API contract?\n"
+        "  □ Have I included ALL necessary imports?\n"
+        "  □ Is every function/class COMPLETE (not truncated)?\n"
+        "  □ Can this code ACTUALLY RUN without errors?\n"
+        "  □ Does it match the exact file path and format specified?\n"
+        "  □ Have I removed all prose outside the FILE blocks?\n"
     )
 
     def run(self, state: PipelineState) -> PipelineState:
@@ -83,45 +114,91 @@ class CoderAgent(BaseAgent):
                 continue
 
             existing = self._read_existing(item, state)
-            prompt = self._build_prompt(item, existing, state)
             
             # Log progress
             action_icon = "✏️" if item.action == "MODIFY" else "✨"
-            print(f"  [{idx}/{len(state.plan)}] {action_icon} {item.action} {item.file}...", end="", flush=True)
+            print(f"  [{idx}/{len(state.plan)}] {action_icon} {item.action:6s} {item.file}...", end="", flush=True)
             
-            response_text, tokens = self._call_llm(state, prompt)
-            total_tokens += tokens
+            # Try generation with retries for quality
+            generated_code = None
+            for attempt in range(2):  # 2 attempts max
+                prompt = self._build_prompt(item, existing, state)
+                response_text, tokens = self._call_llm(state, prompt)
+                total_tokens += tokens
 
-            parsed = self._extract_files_from_response(response_text, validate=True)
+                # Try extracting FILE blocks first
+                parsed = self._extract_files_from_response(response_text, validate=True)
+                
+                if parsed:
+                    # Got valid FILE blocks
+                    generated_code = parsed.get(item.file)
+                    if generated_code:
+                        print(f" ✓ ({tokens} tokens)")
+                        new_files[item.file] = generated_code
+                        break
+                
+                # If FILE block extraction failed, try fallback
+                if not generated_code:
+                    lang = _ext_to_lang(item.file)
+                    fallback_code = self._extract_code_block(response_text, lang)
+                    
+                    try:
+                        self._validate_code_output(item.file, fallback_code)
+                        generated_code = fallback_code
+                        print(f" ✓ ({tokens} tokens) [fallback]")
+                        new_files[item.file] = generated_code
+                        break
+                    except ValueError as e:
+                        if attempt == 0:  # First attempt failed, retry with feedback
+                            print(f" ✗ validation failed, retrying...")
+                            # Build a retry prompt with specific feedback
+                            retry_prompt = f"""
+The previous attempt had issues:
+{str(e)}
 
-            if parsed:
-                new_files.update(parsed)
-                print(f" ✓ ({tokens} tokens)")
-            else:
-                # Fall back: try extracting a single code block (no FILE: header)
-                lang = _ext_to_lang(item.file)
-                code = self._extract_code_block(response_text, lang)
-                try:
-                    self._validate_code_output(item.file, code)
-                    new_files[item.file] = code
-                    print(f" ✓ ({tokens} tokens) [fallback parse]")
-                except ValueError as exc:
-                    print(f" ✗")
-                    raise RuntimeError(
-                        f"Coder failed to produce valid code for {item.file!r}: {exc}"
-                    ) from exc
+Please regenerate {item.file} with these fixes:
+1. Use the EXACT FILE block format specified in your system prompt
+2. Include ALL imports at the top of the file
+3. Ensure NO functions are truncated or incomplete
+4. Use the proper language fence (```{lang})
+5. Return ONLY the FILE block, no explanations
 
-        print(f"\n📝 Coder complete: {len(new_files)} files generated")
+RETRY OUTPUT:
+
+# FILE: {item.file}
+```{lang}
+<complete, perfect code here>
+```
+"""
+                            retry_response, retry_tokens = self._call_llm(state, retry_prompt)
+                            total_tokens += retry_tokens
+                            response_text = retry_response
+                            # Loop will retry extraction
+                        else:
+                            # Second attempt also failed
+                            print(f" ✗")
+                            raise RuntimeError(
+                                f"Coder failed to produce valid code for {item.file!r} after retries: {e}"
+                            ) from e
+            
+            # Ensure we got something
+            if item.file not in new_files:
+                print(f" ✗")
+                raise RuntimeError(
+                    f"Coder could not generate {item.file!r} despite multiple attempts"
+                )
+
+        print(f"\n📝 Coder complete: {len(new_files)} files generated, {total_tokens} tokens")
         output = CoderOutput(
             generated_files=new_files,
-            modified_files=set(new_files.keys())  # All newly generated files
+            modified_files=set(new_files.keys())
         )
         state.apply(output)
         state.fix_instructions = None
         state.log(
             self.name,
             tokens=total_tokens,
-            notes=f"{len(new_files)} files generated from plan",
+            notes=f"{len(new_files)} files from plan",
         )
         return state
 
@@ -140,67 +217,169 @@ class CoderAgent(BaseAgent):
         return ""
 
     def _build_prompt(self, item, existing: str, state: PipelineState) -> str:
+        """Build comprehensive prompt with full context for high-quality code generation."""
         existing_block = (
-            f"\nExisting content to modify:\n```\n{existing}\n```" if existing else ""
+            f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"EXISTING CONTENT (to modify):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"```\n{existing}\n```" 
+            if existing else ""
         )
         
-        # Include previously generated files as context for consistency
+        # Include ALL plan items for context (not just current one)
+        plan_context = ""
+        if state.plan:
+            plan_lines = ["COMPLETE IMPLEMENTATION PLAN:", ""]
+            for idx, p in enumerate(state.plan, 1):
+                plan_lines.append(f"{idx}. {p.action:6s} | {p.file}")
+                plan_lines.append(f"   Desc: {p.description}")
+                if p.api_contract:
+                    plan_lines.append(f"   API:  {p.api_contract}")
+                if p.scope_estimate:
+                    plan_lines.append(f"   Size: {p.scope_estimate}")
+                plan_lines.append("")
+            plan_context = (
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{chr(10).join(plan_lines)}"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
+        
+        # Include previously generated files for consistency
         previously_generated = {
             fpath: content 
             for fpath, content in state.generated_files.items()
-            if fpath != item.file  # Don't include the file we're generating
+            if fpath != item.file
         }
         context_block = ""
         if previously_generated:
             files_context = self._format_files_truncated(previously_generated)
-            context_block = f"\nREFERENCE: Previously generated files in this session:\n{files_context}"
+            context_block = (
+                f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"PREVIOUSLY GENERATED FILES (for consistency and context):\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{files_context}"
+            )
         
-        return f"""
-Implement the following backend file.
+        # Language-specific patterns
+        lang_patterns = ""
+        if state.language and state.language != "auto":
+            lang_patterns = self._get_language_patterns(state.language, item.file)
+        
+        prompt = f"""
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ CODE GENERATION REQUEST — MISSION CRITICAL                               ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-File: {item.file}
-Action: {item.action}
-Description: {item.description}
-API Contract: {item.api_contract or 'N/A'}
-Scope estimate: {item.scope_estimate or 'N/A'}
+TASK: Implement a single production-grade source file
+
+TARGET FILE:
+  Path:           {item.file}
+  Action:         {item.action}
+  Language:       {state.language if state.language != 'auto' else 'detect from extension'}
+  Description:    {item.description}
+  
+API CONTRACT (MUST IMPLEMENT EXACTLY):
+  {item.api_contract if item.api_contract else '(no special contract; follow description)'}
+
+SCOPE ESTIMATE:
+  {item.scope_estimate or 'reasonable scope for a single file'}
+
+FULL TASK CONTEXT:
+  {state.task_prompt}
+
+{plan_context}
 {existing_block}{context_block}
+{lang_patterns}
 
-Full task context: {state.task_prompt}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MANDATORY DELIVERY CHECKLIST (all items required):
 
-─────────────────────────────────────────────────────────────────────
-MANDATORY OUTPUT FORMAT (machine-parsed, no exceptions)
+☐ File path is exactly: {item.file}
+☐ All imports are REAL libraries/modules (no made-up names)
+☐ All functions/classes are COMPLETE (no truncation, no '...')
+☐ Code implements EXACTLY the API contract above
+☐ Error handling present for edge cases
+☐ Type hints included (Python: typing, Java: generics, TypeScript: interfaces)
+☐ Comments only for complex logic, not obvious code
+☐ No placeholder comments ('TODO', 'TO BE IMPLEMENTED', 'rest of file')
+☐ Code will actually RUN without import/syntax errors
 
-EXAMPLE (if implementing src/auth/login.py):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT (ABSOLUTELY STRICT — machine-parsed):
 
-# FILE: src/auth/login.py
-```python
-import requests
-from utils import validate_token
-
-def login(username: str, password: str):
-    if not username or not password:
-        raise ValueError("Missing credentials")
-    user = validate_token(username)
-    return {{"user_id": user.id, "token": generate_token(user)}}
+# FILE: {item.file}
+```{_ext_to_lang(item.file)}
+<COMPLETE file content here — every line, no truncation>
 ```
 
-CRITICAL RULES:
-1. First line: '# FILE: {item.file}' starting at column 0
-2. Next line: ```<language> (e.g., ```python)
-3. Include complete file content, please do not truncate
-4. Close with ``` on its own line
-5. Output only the FILE block with no additional explanation
+RULES:
+  1. Start at column 0 with literal text: # FILE: {item.file}
+  2. Exactly on next line: ```{_ext_to_lang(item.file)}
+  3. Write the COMPLETE code — every character, no truncation
+  4. End with ``` on its own line
+  5. Output ONLY this block — no explanations before or after
+  6. No additional text or prose outside the code block
 
-VERIFICATION:
-  ☐ Starts with "# FILE: {item.file}"
-  ☐ Second line is ```<language>
-  ☐ Code is complete
-  ☐ Ends with ``` on its own line
-  ☐ No text outside the code blocks
-─────────────────────────────────────────────────────────────────────
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Please output the file block now:
+NOW GENERATE THE COMPLETE FILE:
 """
+        return prompt
+
+    @staticmethod
+    def _get_language_patterns(language: str, filepath: str) -> str:
+        """Return language-specific conventions and patterns."""
+        patterns = {
+            "python": (
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "PYTHON CONVENTIONS:\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "  • Use 'from typing import ...' for type hints\n"
+                "  • Use dataclasses or Pydantic models for data structures\n"
+                "  • Use f-strings for formatting\n"
+                "  • Use 'raise ValueError/TypeError' for errors\n"
+                "  • Use logging module for debug output\n"
+                "  • Follow PEP 8 naming: snake_case for functions/vars\n"
+                "  • Include docstrings with type info: '''param: type -> type'''\n"
+            ),
+            "java": (
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "JAVA CONVENTIONS:\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "  • Use proper package structure matching filepath\n"
+                "  • Include all imports (no wildcard imports)\n"
+                "  • Use generics for type safety\n"
+                "  • Use ArrayList/HashMap/HashSet from java.util\n"
+                "  • Use throw new exceptions, not bare exceptions\n"
+                "  • Use lombok @Data/@RequiredArgsConstructor if available\n"
+                "  • Include Javadoc comments for public APIs\n"
+                "  • Use modern Java features (streams, Optional)\n"
+            ),
+            "typescript": (
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "TYPESCRIPT CONVENTIONS:\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "  • Define interfaces for all data structures\n"
+                "  • Use 'export' for public functions/classes\n"
+                "  • Use explicit return types on functions\n"
+                "  • Use async/await for async operations\n"
+                "  • Use proper error handling with try/catch\n"
+                "  • Use const/let (never var)\n"
+                "  • Import from installed packages (npm modules)\n"
+            ),
+            "go": (
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "GO CONVENTIONS:\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "  • Package name should match directory name\n"
+                "  • Export public functions with CamelCase\n"
+                "  • Always handle errors: if err != nil { return err }\n"
+                "  • Use interfaces for abstraction\n"
+                "  • Use defer for cleanup\n"
+                "  • Use proper logging (log package)\n"
+            ),
+        }
+        return patterns.get(language.lower(), "")
+
 
     # ── Fix / retry generation ────────────────────────────────────────────
 
@@ -208,49 +387,65 @@ Please output the file block now:
         files_block = self._format_files_truncated(state.generated_files)
 
         prompt = f"""
-Please fix code failures by regenerating the source files based on the debug analysis.
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ CRITICAL FIX REQUEST — PRODUCTION CODE REPAIR                          ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-DEBUGGER'S FIX INSTRUCTIONS:
+Your previous code generation had issues. The test suite found problems.
+
+DEBUGGER'S ANALYSIS (what's wrong):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {state.fix_instructions}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CURRENT SOURCE FILES:
+CURRENT SOURCE FILES (to fix):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {files_block}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 YOUR TASK:
-1. Review the fix instructions
-2. Identify which specific files need updates
-3. Regenerate ONLY those files with the recommended fixes applied
-4. Return updated files in the format below
+  1. Read the Debugger's analysis carefully
+  2. Identify WHICH FILES need to be fixed
+  3. Regenerate ONLY those files with all recommended fixes applied
+  4. Ensure fixes are COMPLETE and actually solve the problems
+  5. Do NOT regenerate files that don't need changes (save tokens)
 
-IMPORTANT: Do NOT regenerate files that do not require changes. Files you do not include in your response will be preserved exactly as they are. This is critical to stay within token limits.
+CRITICAL RULES:
+  ☐ Each file must have ALL IMPORTS for the fixes to work
+  ☐ No truncated or incomplete code
+  ☐ Fix descriptions must actually be addressed in code
+  ☐ Output format EXACT (machine-parsed):
+      # FILE: path/to/file.ext
+      ```language
+      <COMPLETE FIXED CODE>
+      ```
 
-─────────────────────────────────────────────────────────────────────
-OUTPUT FORMAT:
+FILES IN PROJECT:
+  {', '.join(state.generated_files.keys())}
 
-# FILE: src/auth/login.py
+REGENERATE FILES (format example):
+
+# FILE: src/auth.py
 ```python
-<complete updated content>
+import hashlib
+from typing import Optional
+
+def validate_password(pwd: str) -> bool:
+    '''Fixed: now handles edge cases and validates properly'''
+    if not pwd:
+        return False
+    return len(pwd) >= 8
 ```
 
 # FILE: src/config.py
 ```python
-<complete updated content>
+DATABASE_URL = "postgresql://localhost/db"
+TIMEOUT = 30
 ```
 
-GUIDELINES:
-1. Each file starts with '# FILE: <path>' at column 0
-2. Follow immediately with ```<language>
-3. Include complete file content
-4. Close with ```
-5. Separate multiple files with a blank line
-6. Provide only FILE blocks, no additional text
-
-FILES CURRENTLY IN PROJECT:
-{', '.join(state.generated_files.keys()) or 'applicable files'}
-
-Please provide the updated files (ONLY for those being modified):
+Now provide ONLY the files that need fixing (use FILE blocks):
 """
-        print(f"\n🔧 Coder: Applying fixes from Debugger...")
+        print(f"\n🔧 Coder: Applying debugger feedback...")
         response_text, tokens = self._call_llm(state, prompt)
         parsed = self._extract_files_from_response(response_text, validate=True)
 
@@ -259,76 +454,71 @@ Please provide the updated files (ONLY for those being modified):
             fixed_files = parsed
             print(f"✓ Extracted {len(parsed)} fixed file(s)")
         else:
-            # Try harder: if no explicit FILE blocks, try extracting from prose
-            console_msg = (
-                "[Coder] Warning: No FILE blocks found in response. "
-                "Attempting to extract code from Debugger instructions and regenerate..."
-            )
-            print(console_msg)
+            # Retry with stricter format instructions
+            print("[Coder] No FILE blocks found. Retrying with explicit format...")
             
-            # As a fallback, ask for regeneration again with stricter format
             regenerate_prompt = f"""
-Please output the fixed files using the standard format. Here's what's needed:
+I need you to fix the code using the standard FILE block format.
 
-Files to update: {', '.join(state.generated_files.keys())}
-
-Fixes to apply:
+Issues to fix:
 {state.fix_instructions}
 
-FORMAT EXAMPLE:
+Files available: {', '.join(state.generated_files.keys())}
 
-# FILE: src/auth.py
+Generate ONLY the files that need fixes. Use this EXACT format:
+
+# FILE: src/main.py
 ```python
-import hashlib
-
-def validate_password(pwd: str) -> bool:
-    return len(pwd) >= 8
+<complete fixed code here>
 ```
 
-# FILE: src/config.py
+# FILE: src/utils.py
 ```python
-DATABASE_URL = "postgresql://localhost/db"
+<complete fixed code here>
 ```
 
-GUIDELINES:
-  • Each file: '# FILE: <path>' at column 0
-  • Next line: ```<language>
-  • Complete code (no truncation)
-  • Close with ``` on its own line
-  • Nothing outside the ``` blocks
-  • Blank line between files
+Rules:
+  • Start with "# FILE: " at column 0
+  • Follow with exact language: ```python, ```java, ```typescript
+  • Include ALL imports needed for the fixes
+  • Code must be complete (no truncation)
+  • End with ```
+  • Separate multiple files with blank lines
+  • Output ONLY FILE blocks (no explanation text)
 
-Please provide the files now:
+NOW PROVIDE THE FIXED FILES:
 """
             retry_text, retry_tokens = self._call_llm(state, regenerate_prompt)
             tokens += retry_tokens
             fixed_files = self._extract_files_from_response(retry_text, validate=False)
             
-            if not fixed_files:
+            if fixed_files:
+                print(f"✓ Retry successful: extracted {len(fixed_files)} file(s)")
+            else:
                 print(
-                    "[Coder] ERROR: Could not extract fixed files from response. "
-                    "The fix may not have been applied. Outputting unchanged files."
+                    "[Coder] ERROR: Could not extract fixed files after retry. "
+                    "Preserving current files and escalating."
                 )
                 fixed_files = {}
-            else:
-                print(f"✓ Retry successful: extracted {len(fixed_files)} file(s)")
 
-        # Show which files were updated
+        # Show results
         if fixed_files:
-            print("\n📄 Updated files:")
-            for fpath in fixed_files:
+            print(f"\n📄 Fixed {len(fixed_files)} file(s):")
+            for fpath in sorted(fixed_files.keys()):
                 print(f"   • {fpath}")
+        else:
+            print("[Coder] No fixes generated")
 
         output = CoderOutput(
             generated_files=fixed_files,
-            modified_files=set(fixed_files.keys())  # Only these files were fixed
+            modified_files=set(fixed_files.keys())
         )
         state.apply(output)
         state.fix_instructions = None
         state.log(
             self.name,
             tokens=tokens,
-            notes=f"Fix applied to {len(fixed_files)} file(s): {list(fixed_files.keys())}",
+            notes=f"Applied fixes to {len(fixed_files)} file(s)",
         )
         return state
 
