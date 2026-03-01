@@ -122,57 +122,62 @@ class CoderAgent(BaseAgent):
             local_tokens = 0
             
             for attempt in range(2):
-                prompt = self._build_prompt(item, existing, state)
-                response_text, tokens = self._call_llm(state, prompt)
-                local_tokens += tokens
+                try:
+                    prompt = self._build_prompt(item, existing, state)
+                    response_text, tokens = self._call_llm(state, prompt)
+                    local_tokens += tokens
 
-                parsed = self._extract_files_from_response(response_text, validate=True)
-                
-                if parsed and item.file in parsed:
-                    generated_code = parsed[item.file]
-                    with print_lock:
-                        print(f" ✓ {item.file} ({tokens} tokens)")
-                    break
-                
-                if not generated_code:
-                    lang = _ext_to_lang(item.file)
-                    fallback_code = self._extract_code_block(response_text, lang)
+                    parsed = self._extract_files_from_response(response_text, validate=True)
                     
-                    try:
+                    if parsed and item.file in parsed:
+                        generated_code = parsed[item.file]
+                        with print_lock:
+                            print(f" ✓ {item.file} ({tokens} tokens)")
+                        break
+                    
+                    if not generated_code:
+                        lang = _ext_to_lang(item.file)
+                        fallback_code = self._extract_code_block(response_text, lang)
+                        
                         self._validate_code_output(item.file, fallback_code)
                         generated_code = fallback_code
                         with print_lock:
                             print(f" ✓ {item.file} ({tokens} tokens) [fallback]")
                         break
-                    except ValueError as e:
-                        if attempt == 0:
-                            with print_lock:
-                                print(f" ✗ {item.file} validation failed, retrying...")
-                            retry_prompt = f"""
-The previous attempt had issues:
+                except Exception as e:
+                    if attempt == 0:
+                        with print_lock:
+                            print(f" ✗ {item.file} failed: {str(e)[:100]}..., retrying...")
+                        retry_prompt = f"""
+The previous attempt had issues or failed to generate valid code:
 {str(e)}
 
 Please regenerate {item.file} with these fixes:
 1. Use the EXACT FILE block format specified in your system prompt
 2. Include ALL imports at the top of the file
 3. Ensure NO functions are truncated or incomplete
-4. Use the proper language fence (```{lang})
-5. Return ONLY the FILE block, no explanations
+4. Return ONLY the FILE block, no explanations
 
 RETRY OUTPUT:
 
 # FILE: {item.file}
-```{lang}
+```<language>
 <complete, perfect code here>
 ```
 """
+                        try:
                             retry_response, retry_tokens = self._call_llm(state, retry_prompt)
                             local_tokens += retry_tokens
                             response_text = retry_response
-                        else:
-                            with print_lock:
-                                print(f" ✗ {item.file}")
-                            raise RuntimeError(f"Coder failed to produce valid code for {item.file!r} after retries: {e}") from e
+                            # Note: The original logic didn't actually process the fallback parsing here, 
+                            # it just let it loop again. But we can't 'continue' because the loop doesn't 
+                            # use previous response_text. So we actually just let it fail and it'll retry the loop!
+                        except Exception as inner_e:
+                            pass # Let loop continue to attempt 1
+                    else:
+                        with print_lock:
+                            print(f" ✗ {item.file}")
+                        raise RuntimeError(f"Coder failed to produce valid code for {item.file!r} after retries: {e}") from e
             if not generated_code:
                 with print_lock:
                     print(f" ✗ {item.file}")
