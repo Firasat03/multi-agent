@@ -194,27 +194,97 @@ class TesterAgent(BaseAgent):
 
     # ── Test generation ───────────────────────────────────────────────────
 
+    @staticmethod
+    def _filter_core_logic_files(files: dict[str, str]) -> dict[str, str]:
+        """
+        Return only files that contain core business logic worth testing.
+        Skips boilerplate: DTOs, entities/models, config, constants,
+        annotations, exceptions, enums, and build/resource files.
+        """
+        # Path segments that indicate non-core files (case-insensitive)
+        skip_path_segments = {
+            "dto", "dtos", "entity", "entities", "model", "models",
+            "constant", "constants", "annotation", "annotations",
+            "config", "configuration",
+            "exception", "exceptions",
+            "enum", "enums",
+            "request", "response",    # DTO-like
+            "migration", "migrations",
+        }
+        # Exact filenames to skip (case-insensitive)
+        skip_filenames = {
+            "application.yml", "application.yaml", "application.properties",
+            "pom.xml", "build.gradle", "build.gradle.kts",
+            "settings.gradle", "settings.gradle.kts",
+            "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
+            "package.json", "package-lock.json", "tsconfig.json",
+            "__init__.py", "conftest.py",
+            "dockerfile", "docker-compose.yml", "docker-compose.yaml",
+            ".env", ".env.example",
+            "readme.md",
+        }
+        # File suffixes that indicate non-core files
+        skip_suffixes = (
+            "dto.py", "dto.java", "dto.kt", "dto.ts",
+            "entity.py", "entity.java", "entity.kt",
+            "model.py", "model.java", "model.kt",
+            "request.py", "request.java", "request.kt",
+            "response.py", "response.java", "response.kt",
+            "config.py", "config.java", "config.kt",
+            "constants.py", "constants.java",
+            "enums.py", "enums.java",
+        )
+
+        core_files = {}
+        for path, content in files.items():
+            path_lower = path.lower()
+            filename = os.path.basename(path_lower)
+
+            # Skip known non-core filenames
+            if filename in skip_filenames:
+                continue
+
+            # Skip files whose suffix matches a non-core pattern
+            if any(filename.endswith(suffix) for suffix in skip_suffixes):
+                continue
+
+            # Skip if any path segment is a known non-core category
+            parts = set(path_lower.replace("\\", "/").split("/"))
+            if parts & skip_path_segments:
+                continue
+
+            core_files[path] = content
+
+        return core_files
+
     def _generate_tests(
         self, state: PipelineState, language: str, output: TesterOutput,
         files_to_test: set[str] | None = None
     ) -> TesterOutput:
         """
         Generate test files for the given source files.
+        Only core logic files are tested on the first run; on retries only
+        modified files are retested.
         """
         lang_config = LANGUAGE_CONFIG.get(language, LANGUAGE_CONFIG["unknown"])
         framework   = lang_config["test_framework"]
         test_folder = lang_config["test_folder"]
         test_ext    = lang_config["test_extension"]
 
-        source_files = state.generated_files.items()
         if files_to_test:
+            # Retry path: only regenerate tests for Coder-modified files
             source_files = [
-                (path, content) for path, content in source_files
+                (path, content) for path, content in state.generated_files.items()
                 if path in files_to_test
             ]
             print(f"   ℹ️  Regenerating tests for {len(files_to_test)} modified file(s)")
         else:
-            print(f"   ℹ️  Generating tests for {len(state.generated_files)} file(s)")
+            # First run: filter to core logic files only
+            core_files = self._filter_core_logic_files(state.generated_files)
+            skipped = len(state.generated_files) - len(core_files)
+            source_files = list(core_files.items())
+            print(f"   ℹ️  Generating tests for {len(source_files)} core logic file(s) "
+                  f"(skipped {skipped} boilerplate/config file(s))")
 
         if not source_files:
             output.test_files = {}
