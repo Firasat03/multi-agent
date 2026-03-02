@@ -16,15 +16,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
+
+from rich.console import Console
+
+_console = Console()
 
 MAX_STARTUP_SECS = 90  # Spring Boot + JPA can take 60-90s
 HEALTH_POLL_SECS = 1
@@ -291,6 +293,7 @@ def _run_single_test(test: dict, base_url: str, created_ids: dict) -> dict:
     url = base_url + path
     headers = {"Content-Type": "application/json"} if body else {}
 
+    _console.print(f"[dim]  → {method} {url}  (expect {expected})[/dim]")
     resp = _curl(method, url, body=body, headers=headers)
     status_ok = resp["status_code"] == expected
 
@@ -300,6 +303,13 @@ def _run_single_test(test: dict, base_url: str, created_ids: dict) -> dict:
         schema_ok = _assert_schema(resp["body"], expected_fields)
 
     passed = status_ok and (schema_ok is not False)
+
+    status_label = "[green]PASS[/green]" if passed else "[red]FAIL[/red]"
+    _console.print(
+        f"  {status_label}  {method} {path}  "
+        f"expected={expected} got={resp['status_code']}"
+        + (f"  schema={'OK' if schema_ok else 'FAIL'}" if schema_ok is not None else "")
+    )
 
     return {
         "method":          method,
@@ -388,6 +398,7 @@ def run_integration_tests(
     _write_files_to_disk(generated_files, project_root)
 
     # ── Build ──────────────────────────────────────────────────────────────
+    _console.print(f"[cyan]🔨 Building project ({lang})…[/cyan]")
     build_result = {"ok": True, "output": ""}
     if lang == "java":
         build_result = _build_java(project_root)
@@ -398,6 +409,7 @@ def run_integration_tests(
     elif lang == "python":
         build_result = _build_python(project_root)
     else:
+        _console.print(f"[yellow]⏭️  No integration strategy for language '{lang}' — skipping[/yellow]")
         return {
             "passed": True, "results": [], "build_output": "",
             "server_startup_log": "",
@@ -405,14 +417,17 @@ def run_integration_tests(
         }
 
     if not build_result["ok"]:
+        _console.print("[red bold]❌ Build FAILED[/red bold]")
         return {
             "passed": False, "results": [],
             "build_output": build_result["output"],
             "server_startup_log": "",
             "error": "BUILD FAILED",
         }
+    _console.print("[green]✔ Build succeeded[/green]")
 
     # ── Start server ───────────────────────────────────────────────────────
+    _console.print(f"[cyan]🚀 Starting {lang} server on port {port}…[/cyan]")
     starters = {
         "java":   _start_java_server,
         "nodejs": _start_nodejs_server,
@@ -421,6 +436,7 @@ def run_integration_tests(
     }
     proc = starters[lang](project_root, port)
     if proc is None:
+        _console.print(f"[red]❌ Could not start server for language '{lang}'[/red]")
         return {
             "passed": False, "results": [],
             "build_output": build_result["output"],
@@ -431,29 +447,39 @@ def run_integration_tests(
     # ── Wait for health ────────────────────────────────────────────────────
     ready = False
     startup_lines: list[str] = []
+    _console.print(f"[dim]⏳ Waiting for server on port {port} (up to {MAX_STARTUP_SECS}s)…[/dim]")
     for i in range(int(MAX_STARTUP_SECS / HEALTH_POLL_SECS)):
         time.sleep(HEALTH_POLL_SECS)
-        # Drain any available server output
+        # Drain any available server output and print live
         if proc.stdout:
             try:
-                # Attempt non-blocking read (works better cross-platform than select)
                 line = proc.stdout.readline()
                 if line:
-                    startup_lines.append(line.rstrip())
+                    stripped = line.rstrip()
+                    startup_lines.append(stripped)
+                    _console.print(f"[dim]  server │ {stripped}[/dim]")
             except (IOError, OSError):
                 pass
-        
+
         if proc.poll() is not None:
+            _console.print("[red]  server │ process exited early — draining output…[/red]")
             # Server exited early — drain remaining output
             if proc.stdout:
                 try:
                     for line in proc.stdout.readlines():
-                        startup_lines.append(line.rstrip())
+                        stripped = line.rstrip()
+                        startup_lines.append(stripped)
+                        _console.print(f"[dim]  server │ {stripped}[/dim]")
                 except (IOError, OSError):
                     pass
             break
-        
+
+        elapsed_s = (i + 1) * HEALTH_POLL_SECS
+        if elapsed_s % 5 == 0:
+            _console.print(f"[dim]  health-check… {elapsed_s}s elapsed[/dim]")
+
         if _poll_health(port):
+            _console.print(f"[green]  ✔ Server is healthy on port {port} after {elapsed_s}s[/green]")
             ready = True
             break
 
@@ -478,6 +504,7 @@ def run_integration_tests(
         tests = [{"method": "GET", "path": "/actuator/health",
                   "expected_status": 200, "expected_fields": []}]
 
+    _console.print(f"[cyan]🧪 Running {len(tests)} endpoint test(s)…[/cyan]")
     created_ids: dict[str, str] = {}
 
     # ── Run curl tests (OPTIMIZED: parallel with dependency handling) ─────
