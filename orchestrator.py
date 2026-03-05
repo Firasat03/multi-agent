@@ -38,10 +38,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import sys
 import time
-from pathlib import Path
-from typing import Callable
 
 from rich.console import Console
 from rich.panel import Panel
@@ -431,7 +428,7 @@ def run(
             console.print("[yellow]⏭️  Skipping Stage 4b — Integration Tests (disabled)[/yellow]")
         elif state.status not in (Status.FAILED, Status.ABORTED):
             # Integration stage can run after unit tests pass, or independently if tester is skipped
-            if state.status in (Status.TESTING, Status.DEBUGGING, Status.INTEGRATION, 
+            if state.status in (Status.TESTING, Status.DEBUGGING, Status.INTEGRATION,
                               Status.REVIEWING, Status.CODING, Status.SECURITY):
                 attempts = state.retry_count
 

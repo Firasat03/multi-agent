@@ -157,7 +157,7 @@ class LLMProvider(ABC):
         # Try direct parse first
         try:
             return json.loads(clean)
-        except json.JSONDecodeError as first_error:
+        except json.JSONDecodeError:
             pass
         
         # Fallback: find the first valid JSON block using bracket matching

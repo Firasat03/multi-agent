@@ -15,9 +15,9 @@ from __future__ import annotations
 import os
 import re
 from agents.base_agent import BaseAgent
-from config import CHARS_PER_TOKEN, DEFAULT_CONTEXT_WINDOW, MODEL_CONTEXT_WINDOWS, Status
+from config import Status
 from state import CoderOutput, PipelineState
-from tools.mcp_client import get_client
+
 
 
 # Max chars of file content to include in fix prompts before truncating
@@ -169,11 +169,14 @@ RETRY OUTPUT:
                             retry_response, retry_tokens = self._call_llm(state, retry_prompt)
                             local_tokens += retry_tokens
                             response_text = retry_response
-                            # Note: The original logic didn't actually process the fallback parsing here, 
-                            # it just let it loop again. But we can't 'continue' because the loop doesn't 
-                            # use previous response_text. So we actually just let it fail and it'll retry the loop!
-                        except Exception as inner_e:
-                            pass # Let loop continue to attempt 1
+                            # Re-parse the retry response immediately
+                            parsed = self._extract_files_from_response(response_text, validate=True)
+                            if parsed and item.file in parsed:
+                                generated_code = parsed[item.file]
+                                with print_lock:
+                                    print(f" \u2713 {item.file} ({local_tokens} tokens) [retry]")
+                        except Exception:
+                            pass  # Let loop continue to attempt 1
                     else:
                         with print_lock:
                             print(f" ✗ {item.file}")

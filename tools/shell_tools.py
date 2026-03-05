@@ -227,7 +227,6 @@ def _python_pyflakes_check(files: dict[str, str]) -> list[str]:
     """
     try:
         from pyflakes.checker import Checker
-        from pyflakes import messages as pyflakes_msgs
     except ImportError:
         return []
 
@@ -262,7 +261,6 @@ def _generic_sanity_check(files: dict[str, str], language: str) -> list[str]:
         r"(TODO|FIXME|PLACEHOLDER|rest of code here|implement this)",
         re.IGNORECASE,
     )
-    comment_only_re = re.compile(r"^\s*(//|#|/\*|\*|<!--)", re.MULTILINE)
 
     for path, content in files.items():
         stripped = content.strip()

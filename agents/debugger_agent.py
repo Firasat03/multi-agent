@@ -12,6 +12,7 @@ Changes vs original:
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 from agents.base_agent import BaseAgent
 from config import Status
@@ -197,12 +198,11 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
         # Strategy 3: Extract file paths from the ANALYSIS section (fallback)
         # Look for common patterns like "src/auth/...", "tests/...", etc.
         if not affected:
-            import re as regex_mod
             # Match common Java/Python file paths in the response
-            file_patterns = regex_mod.findall(
+            file_patterns = re.findall(
                 r'(?:src|tests)/[a-zA-Z0-9/_\-\.]+\.(?:java|py|ts|go)',
                 response_text,
-                regex_mod.IGNORECASE
+                re.IGNORECASE
             )
             affected.extend([f for f in file_patterns if len(f) > 2])
         
@@ -225,7 +225,7 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
                 files_with_issues=affected_set,
             )
             state.apply(output)
-            print(f"   ⚠️  LOW CONFIDENCE ({confidence}/5) - Cannot reliably fix issues")
+            print(f"     LOW CONFIDENCE ({confidence}/5) - Cannot reliably fix issues")
             print(f"   📍 Affected files: {affected_str}")
             print(f"   🚨 Escalating to human review")
             state.log(
@@ -276,8 +276,7 @@ NOW OUTPUT STRUCTURED ANALYSIS WITH FIX INSTRUCTIONS:
         # Extract file paths from error messages
         # Matches patterns like "src/auth.py", "tests/test_auth.py", "pom.xml", etc.
         pattern = r'(?:src|tests|config|lib)/[a-zA-Z0-9/_\-\.]+\.(?:[a-z]+)|[a-zA-Z0-9\-]+\.(?:xml|yaml|json|txt|properties|py|java|ts|js|go|rs|kt)'
-        import re as regex_mod
-        matches = regex_mod.findall(pattern, error_text, regex_mod.IGNORECASE)
+        matches = re.findall(pattern, error_text, re.IGNORECASE)
         
         for match in matches:
             # Try to find matching file in all_files

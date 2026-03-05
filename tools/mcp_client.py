@@ -1,7 +1,6 @@
 """tools/mcp_client.py — unchanged from original"""
 from __future__ import annotations
 import json
-from pathlib import Path
 from config import MCP_CONFIG_FILE
 
 def _load_agent_config() -> dict:
